@@ -109,6 +109,9 @@ table.abs td,table.abs th{border-bottom:1px solid var(--line);padding:8px 10px}
 .sync.off{color:var(--warn)} .sync.off::before{background:var(--warn)}
 .progress{height:8px;border-radius:99px;background:var(--soft);overflow:hidden;margin-top:6px}
 .progress span{display:block;height:100%;background:var(--accent);border-radius:99px}
+.mini{display:block;margin-top:4px;border:0;background:none;padding:0;font:inherit;font-size:11px;font-weight:700;color:var(--muted);text-decoration:underline;cursor:pointer;white-space:nowrap;margin-left:auto}
+.mini:hover{color:var(--accent)}
+.item .alt{display:block;font-size:11px;color:var(--muted);font-style:italic}
 .item .who{display:block;font-size:11px;font-weight:700;color:var(--accent)}
 .group.miss{border-color:var(--sun)}
 .mitem{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
@@ -774,7 +777,7 @@ const ADDONS = [
 ];
 
 /* ============ Réglages ============ */
-const DEF = { snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: true, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
+const DEF = { store2: "Carrefour Market Beauzelle", where: {}, snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: true, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 let S = Object.assign({}, DEF, load("tds:settings", {}));
@@ -1026,6 +1029,7 @@ function courseFor(dn) {
 }
 const SLOT = { b: "matin", l: "midi", c: "goûter", d: "soir", f: "dessert", a: "bonus" };
 function storeOf(i) {
+  if (S.where && S.where[i.k] === "autre") return "autre";
   if (i.s) return "placard";
   if (i.r === "bo") return S.meatAt === "boucher" ? "boucher" : "magasin";
   if (i.r === "po") return S.fishAt === "poissonnier" ? "poissonnier" : "magasin";
@@ -1366,18 +1370,20 @@ function vMissing() {
 }
 
 /* ---- Courses ---- */
-const STORE_TITLE = () => ({ magasin: S.store, boucher: "Boucher", poissonnier: "Poissonnier", boulangerie: "Boulangerie", placard: "Épicerie et placard" });
+const STORE_TITLE = () => ({ magasin: S.store, boucher: "Boucher", poissonnier: "Poissonnier", boulangerie: "Boulangerie", placard: "Épicerie et placard", autre: S.store2 || "Autre magasin" });
+/* Où chercher si ton magasin n'en a pas */
+const ALT = { tahini: "magasin bio ou rayon du monde", sarrasin: "magasin bio ou rayon bio", ras: "rayon épices ou épicerie orientale", lentilles_corail: "rayon bio ou vrac", quinoa: "rayon bio ou vrac", nouilles_riz: "rayon asiatique", cacahuete: "rayon bio (100 % cacahuètes)", espelette: "rayon épices", lait_coco: "rayon asiatique", fruits_rouges: "rayon surgelés ou Picard", petits_pois: "rayon surgelés ou Picard", sardines_bt: "rayon conserves", maquereau_bt: "rayon conserves", dattes: "rayon fruits secs ou épicerie orientale", graines_courge: "rayon bio ou vrac", sesame: "rayon bio ou vrac", flocons: "rayon petit-déjeuner ou bio" };
 function vCourses() {
   const c = courseFor(st.course);
   const list = shopList(c.from, c.to, c.dn);
-  const groups = { magasin: [], boucher: [], poissonnier: [], boulangerie: [], placard: [] };
+  const groups = { magasin: [], boucher: [], poissonnier: [], boulangerie: [], placard: [], autre: [] };
   list.forEach(it => groups[storeOf(ING[it.k])].push(it));
   const order = Object.keys(RAYONS);
   const sortIt = (a, b) => order.indexOf(ING[a.k].r) - order.indexOf(ING[b.k].r) || ING[a.k].n.localeCompare(ING[b.k].n, "fr");
   const row = it => {
     const uses = it.uses.filter(u => u.slot !== "a").slice(0, 6).map(u => fmtDate(u.dn, { short: true, noMonth: true }) + " " + SLOT[u.slot]);
     const ck = checkOf(c.dn, it.k);
-    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc([...new Set(uses)].join(", "))}${it.uses.length > 6 ? "…" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}</span></li>`;
+    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc([...new Set(uses)].join(", "))}${it.uses.length > 6 ? "…" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
   };
   const T = STORE_TITLE();
   const block = key => {
@@ -1389,7 +1395,7 @@ function vCourses() {
       inner = order.filter(r => byR[r]).map(r => `<h4>${RAYONS[r]}</h4><ul class="items">${byR[r].map(row).join("")}</ul>`).join("");
     } else inner = `<ul class="items">${its.map(row).join("")}</ul>`;
     const left = its.filter(it => !checkOf(c.dn, it.k)).length;
-    const sub = { boucher: "Demande du haché minute et des portions sous vide si tu congèles.", poissonnier: "Marché Victor Hugo (mardi → dimanche matin) ou rayon marée.", placard: "Seulement quand le paquet précédent est fini. La toute première liste part d'un placard vide : ne rachète pas ce que tu as déjà." }[key];
+    const sub = { boucher: "Demande du haché minute et des portions sous vide si tu congèles.", poissonnier: "Marché Victor Hugo (mardi → dimanche matin) ou rayon marée.", placard: "Seulement quand le paquet précédent est fini. La toute première liste part d'un placard vide : ne rachète pas ce que tu as déjà.", autre: "Ce que tu as marqué « Pas trouvé ici » chez " + esc(S.store) + ". L'app s'en souvient pour les prochaines listes." }[key];
     return `<section class="group"><h3>${esc(T[key])} <small class="num">${left} restant${left > 1 ? "s" : ""} / ${its.length}</small></h3>${sub ? `<p class="small muted" style="margin:2px 0 0">${sub}</p>` : ""}${inner}</section>`;
   };
   // ce que vous avez noté dans « Il manque »
@@ -1409,7 +1415,7 @@ function vCourses() {
     <div class="small num"><b>${got} / ${total}</b> articles pris${got === total && total ? " : tout est dans le caddie" : ""}</div>
   </div>
   <div class="row" style="margin-bottom:12px"><button class="btn" data-act="copylist" data-c="${c.dn}">Copier la liste</button>${st.confirm === "uncheck" ? `<button class="btn danger" data-act="uncheck" data-c="${c.dn}">Confirmer : tout décocher pour vous deux</button><button class="btn ghost" data-act="cancel">Annuler</button>` : `<button class="btn ghost" data-act="ask" data-v="uncheck">Tout décocher</button>`}</div>
-  <div class="cols">${missBlock}${["magasin", "boucher", "poissonnier", "boulangerie", "placard"].map(block).join("")}</div>
+  <div class="cols">${missBlock}${["magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].map(block).join("")}</div>
   <div class="note" style="margin-top:14px">Le poisson est prévu le soir même des jours de courses. Si une viande ou un poisson porte la mention « congèle », mets la portion concernée au congélateur en rentrant et sors-la au frigo la veille.</div>`;
 }
 function listText(c) {
@@ -1417,7 +1423,7 @@ function listText(c) {
   let out = `Courses du ${fmtDate(cc.dn)} (repas du ${fmtDate(cc.from, { short: true })} au ${fmtDate(cc.to, { short: true })})\n`;
   const act = missingActive();
   if (act.length) out += `\nIL MANQUE\n` + act.map(m => `- ${m.name}`).join("\n") + "\n";
-  ["magasin", "boucher", "poissonnier", "boulangerie", "placard"].forEach(s => {
+  ["magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].forEach(s => {
     const its = list.filter(it => storeOf(ING[it.k]) === s);
     if (!its.length) return;
     out += `\n${T[s].toUpperCase()}\n` + its.map(it => `- ${ING[it.k].n} : ${fmtBuy(it)}${it.hint ? " (" + it.hint + ")" : ""}`).join("\n") + "\n";
@@ -1632,6 +1638,7 @@ function vSettings() {
    </section>
    <section class="card"><h2>Courses</h2>
     <div class="field"><label for="s-store">Ton magasin principal</label><input type="text" id="s-store" data-set="store" value="${esc(S.store)}"></div>
+    <div class="field" style="margin-top:10px"><label for="s-store2">Deuxième magasin</label><input type="text" id="s-store2" data-set="store2" value="${esc(S.store2)}"><span class="help">Pour ce que ton magasin principal n'a pas. Dans la liste, touche « Pas trouvé ici » sur un article pour qu'il y aille désormais.${Object.keys(S.where || {}).length ? ` ${Object.keys(S.where).length} article(s) déplacé(s). <button class="mini" type="button" data-act="whereReset">Tout remettre</button>` : ""}</span></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.twoShops ? " on" : ""}"><input type="checkbox" data-set="twoShops"${S.twoShops ? " checked" : ""}>Deux courses par semaine (recommandé pour le frais)</label></div>
     <div class="row" style="margin-top:10px"><div class="field"><label for="s-shop1">Grande course</label><select id="s-shop1" data-set="shop1">${wdBox("shop1", S.shop1)}</select></div>
     <div class="field"><label for="s-shop2">Course d'appoint</label><select id="s-shop2" data-set="shop2">${wdBox("shop2", S.shop2)}</select></div></div>
@@ -1674,6 +1681,8 @@ document.addEventListener("click", e => {
   if (a === "close") { if (e.target === t || t.tagName === "BUTTON") closeModal(); return; }
   if (a === "open") return openRecipe(t.dataset.id, t.dataset.dn, t.dataset.slot);
   if (a === "abs") return openAbs(+t.dataset.dn);
+  if (a === "where") { const w = Object.assign({}, S.where || {}); if (v) w[t.dataset.k] = v; else delete w[t.dataset.k]; S.where = w; saveSettings(); render(); toast(v ? "Déplacé vers " + (S.store2 || "l'autre magasin") : "Remis à " + S.store); return; }
+  if (a === "whereReset") { S.where = {}; saveSettings(); render(); return; }
   if (a === "absall") {
     const f = $("#absForm");
     f.querySelectorAll("[data-abs]").forEach(cb => { const [slot, w] = cb.dataset.abs.split("-"); cb.checked = v === "reset" ? DEFAULT_PRES[slot][w] : v === w ? false : cb.checked; cb.closest(".pill").classList.toggle("on", cb.checked); });
