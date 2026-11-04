@@ -12,7 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="config.js?v=mw2c446h"></script>
+<script src="config.js?v=mw2c7yeh"></script>
 <script>
 (function () {
   const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -835,7 +835,7 @@ concombre|350|concombre|concombres|5|r:crudites
 avocat|1|avocat|avocats|1|r:tartine
 citron|1|citron|citrons|5|r:citron
 citron_vert|1|citron vert|citrons verts|5|r:citron
-ail|10|tête d'ail|têtes d'ail|30|
+ail|10|tête d'ail|têtes d'ail|60|
 melon|1|melon|melons|3|r:dessert`;
 const PK = {};
 PACK_TXT.trim().split("\n").forEach(l => {
@@ -880,7 +880,7 @@ const ADDONS = [
 ];
 
 /* ============ Réglages ============ */
-const DEF = { albi: true, albiFrom: 20770, store2: "Carrefour Market Beauzelle", where: {}, snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: false, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
+const DEF = { albi: true, albiFrom: 20770, albiShopSat: true, albiStore: "Grand Frais Albi", store2: "Carrefour Market Beauzelle", where: {}, snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: false, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 let S = Object.assign({}, DEF, load("tds:settings", {}));
@@ -945,10 +945,11 @@ function resetCache() { CACHE = { days: [], plan: {}, last: {}, pan: {}, waste: 
 function fruitsFor(dn) { const l = FRUITS[monthOf(dn)].filter(k => !S.exclude.includes(k)); return l.length ? l : ["pomme"]; }
 function shopDays() { return S.twoShops && S.shop2 !== S.shop1 ? [S.shop1, S.shop2] : [S.shop1]; }
 /* Jour de courses réel : un samedi à Albi, la grande course passe au lundi suivant (après le travail) */
+const isAlbiCourse = dn => wdOf(dn) === 5 && weekendAway(dn) && !!S.albiShopSat;
 function isShopDay(dn) {
   const wd = wdOf(dn), sd = shopDays();
-  if (wd === 5 && sd.includes(5) && weekendAway(dn)) return false;
-  if (wd === 0 && sd.includes(5) && !sd.includes(0) && weekendAway(dn - 2)) return true;
+  if (wd === 5 && sd.includes(5) && weekendAway(dn)) return !!S.albiShopSat; // courses à Albi le samedi, ou à défaut le lundi soir
+  if (wd === 0 && sd.includes(5) && !sd.includes(0) && weekendAway(dn - 2) && !S.albiShopSat) return true;
   return sd.includes(wd);
 }
 
@@ -1015,7 +1016,7 @@ function weekPlan(w) {
   [0, 1, 2, 3, 4, 5, 6].filter(i => cats[i] == null).forEach((i, k) => cats[i] = pool[k]);
   const start = EPOCH + 7 * w, fresh = [s1, (s1 + 1) % 7, s2, (s2 + 1) % 7];
   if (weekendAway(start + 5) && s1 === 5) { const t = cats[3]; cats[3] = cats[5]; cats[5] = t; } // poisson du samedi → jeudi
-  if (weekendAway(start - 2)) fresh.push(0, 1); // grande course le lundi
+  if (weekendAway(start - 2) && !S.albiShopSat) fresh.push(0, 1); // grande course le lundi
   return { cats, fresh };
 }
 function swapOf(dn, slot) { const id = SWAPS[dn + "|" + slot]; return id && RBYID[id] ? RBYID[id] : null; }
@@ -1075,7 +1076,7 @@ function simDay(d) {
     if (!r) {
       const cat = plan.cats[wd];
       r = isReturn(d)
-        ? pick("d", null, d, rng, srvD, x => (x.cat === "le" || x.cat === "oe" ? 30 : -200) + (x.b ? 15 : -300) + (x.m > 35 ? -40 : 0) + (x.ings.some(([k]) => ING[k].r === "bo" || ING[k].r === "po") ? -300 : 0))
+        ? pick("d", null, d, rng, srvD, x => (x.cat === "le" || x.cat === "oe" ? 30 : -200) + (x.b ? 15 : -300) + (x.m > 35 ? -40 : 0) + (!S.albiShopSat && x.ings.some(([k]) => ING[k].r === "bo" || ING[k].r === "po") ? -300 : 0))
         : pick("d", cat, d, rng, srvD, dB);
       if (r && cat === "rg" && pdn.me && CACHE.redW + redGrams(r) * S.fT * (leftT(r) && wd < 6 ? 2 : 1) > 500) r = pick("d", "vo", d, rng, srvD, dB);
       if (!r) r = pick("d", null, d, rng, srvD, dB);
@@ -1366,7 +1367,7 @@ function vWeek() {
   return `${hero}
   <div class="row between weeknav"><h2>${title}</h2>
     <div class="row"><button class="btn" data-act="wk" data-v="-7" aria-label="Semaine précédente">←</button><button class="btn" data-act="wk" data-v="0">Cette semaine</button><button class="btn" data-act="wk" data-v="7" aria-label="Semaine suivante">→</button></div></div>
-  ${(() => { const sat = st.wk + 5, away = weekendAway(sat); return `<div class="wkend${away ? " away" : ""}"><span>Week-end du ${fmtDate(sat, { noDay: true, noMonth: true })}-${fmtDate(sat + 1, { noDay: true })} : <b>${away ? "à Albi" : "à Toulouse"}</b>${away ? " · grande course le lundi, dîner simple dimanche soir" : ""}</span><button class="btn" data-act="wktoggle" data-dn="${sat}">${away ? "On reste à Toulouse" : "On part à Albi"}</button></div>`; })()}
+  ${(() => { const sat = st.wk + 5, away = weekendAway(sat); return `<div class="wkend${away ? " away" : ""}"><span>Week-end du ${fmtDate(sat, { noDay: true, noMonth: true })}-${fmtDate(sat + 1, { noDay: true })} : <b>${away ? "à Albi" : "à Toulouse"}</b>${away ? (S.albiShopSat ? " · courses du samedi chez " + esc(S.albiStore) + ", dîner simple dimanche soir" : " · grande course le lundi, dîner simple dimanche soir") : ""}</span><button class="btn" data-act="wktoggle" data-dn="${sat}">${away ? "On reste à Toulouse" : "On part à Albi"}</button></div>`; })()}
   <div class="stats">${stats}</div>
   <div class="days">${days.map(dayCard).join("")}</div>
   <div class="legend">${["pg", "pm", "vo", "rg", "le", "oe", "b"].concat(S.snack ? ["c"] : []).map(c => `<span><span class="dot c-${c}"></span>${CAT[c]}</span>`).join("")}</div>
@@ -1527,7 +1528,7 @@ function vMissing() {
 }
 
 /* ---- Courses ---- */
-const STORE_TITLE = () => ({ magasin: S.store, boucher: "Boucher", poissonnier: "Poissonnier", boulangerie: "Boulangerie", placard: "Épicerie et placard", autre: S.store2 || "Autre magasin" });
+const STORE_TITLE = () => ({ magasin: S.store, boucher: "Boucher", poissonnier: "Poissonnier", boulangerie: "Boulangerie", placard: "Épicerie et placard", albi: S.albiStore || "Courses à Albi", autre: S.store2 || "Autre magasin" });
 /* Où chercher si ton magasin n'en a pas */
 const ALT = { tahini: "magasin bio ou rayon du monde", sarrasin: "magasin bio ou rayon bio", ras: "rayon épices ou épicerie orientale", lentilles_corail: "rayon bio ou vrac", quinoa: "rayon bio ou vrac", nouilles_riz: "rayon asiatique", cacahuete: "rayon bio (100 % cacahuètes)", espelette: "rayon épices", lait_coco: "rayon asiatique", fruits_rouges: "rayon surgelés ou Picard", petits_pois: "rayon surgelés ou Picard", sardines_bt: "rayon conserves", maquereau_bt: "rayon conserves", dattes: "rayon fruits secs ou épicerie orientale", graines_courge: "rayon bio ou vrac", sesame: "rayon bio ou vrac", flocons: "rayon petit-déjeuner ou bio" };
 function vCourses() {
@@ -1536,22 +1537,23 @@ function vCourses() {
   const list = shopList(c.from, c.to, c.dn, live);
   const pastNow = live ? ["l", "d"].filter(x => isPast(todayDn(), x)) : [];
   const cutNote = live && (todayDn() > c.from || isPast(todayDn(), "b")) ? `<p class="small" style="margin:4px 0 0"><b>Mise à jour à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</b> : les repas déjà passés${pastNow.length ? " (jusqu'à " + (pastNow.includes("d") ? "ce soir" : "ce midi") + ")" : ""} ne sont plus comptés.</p>` : "";
-  const groups = { magasin: [], boucher: [], poissonnier: [], boulangerie: [], placard: [], autre: [] };
-  list.forEach(it => groups[storeOf(ING[it.k])].push(it));
+  const groups = { magasin: [], boucher: [], poissonnier: [], boulangerie: [], placard: [], autre: [], albi: [] };
+  const atAlbi = isAlbiCourse(c.dn);
+  list.forEach(it => groups[atAlbi ? "albi" : storeOf(ING[it.k])].push(it));
   const order = Object.keys(RAYONS);
   const sortIt = (a, b) => order.indexOf(ING[a.k].r) - order.indexOf(ING[b.k].r) || ING[a.k].n.localeCompare(ING[b.k].n, "fr");
   const row = it => {
     const byDay = []; it.uses.slice().sort((x, y) => x.dn - y.dn || SLOT_ORDER.indexOf(x.slot) - SLOT_ORDER.indexOf(y.slot)).forEach(u => { const last = byDay[byDay.length - 1]; if (last && last.dn === u.dn) { if (!last.s.includes(SLOT[u.slot])) last.s.push(SLOT[u.slot]); } else byDay.push({ dn: u.dn, s: [SLOT[u.slot]] }); });
     const uses = byDay.slice(0, 5).map(x => fmtDate(x.dn, { short: true, noMonth: true }) + " " + x.s.join(" et "));
     const ck = checkOf(c.dn, it.k);
-    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc(uses.join(" · "))}${byDay.length > 5 ? " · …" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
+    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc(uses.join(" · "))}${byDay.length > 5 ? " · …" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = atAlbi ? "albi" : storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
   };
   const T = STORE_TITLE();
   const block = key => {
     const its = groups[key].sort(sortIt);
     if (!its.length) return "";
     let inner = "";
-    if (key === "magasin") {
+    if (key === "magasin" || key === "albi") {
       const byR = {}; its.forEach(it => (byR[ING[it.k].r] = byR[ING[it.k].r] || []).push(it));
       inner = order.filter(r => byR[r]).map(r => `<h4>${RAYONS[r]}</h4><ul class="items">${byR[r].map(row).join("")}</ul>`).join("");
     } else inner = `<ul class="items">${its.map(row).join("")}</ul>`;
@@ -1573,11 +1575,12 @@ function vCourses() {
       <div class="row"><button class="btn" data-act="course" data-v="${c.prev}" aria-label="Course précédente">←</button><button class="btn" data-act="course" data-v="${TODAY}">Prochaine</button><button class="btn" data-act="course" data-v="${c.next}" aria-label="Course suivante">→</button></div></div>
     <p class="muted" style="margin:0">Pour les repas du ${fmtDate(c.from, { short: true })} midi au ${fmtDate(c.to, { short: true })}${resolve(c.next).b && resolve(c.next).b.ings.some(([k]) => ING[k].r !== "pa") ? `, plus le petit-déj du ${fmtDate(c.next, { short: true })} matin` : ""}. La liste ne contient que ce qui manque : les paquets déjà ouverts au frigo ou au placard sont utilisés d'abord.</p>
     ${cutNote}
+    ${atAlbi ? `<p class="small" style="margin:4px 0 0"><b>Week-end à Albi</b> : tout s'achète chez ${esc(S.albiStore)}, viande et poisson compris. Prévois un sac isotherme pour le retour du dimanche.</p>` : ""}
     <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${got}" aria-label="Articles pris"><span style="width:${pct}%"></span></div>
     <div class="small num"><b>${got} / ${total}</b> articles pris${got === total && total ? " : tout est dans le caddie" : ""}</div>
   </div>
   <div class="row" style="margin-bottom:12px"><button class="btn" data-act="copylist" data-c="${c.dn}">Copier la liste</button>${st.confirm === "uncheck" ? `<button class="btn danger" data-act="uncheck" data-c="${c.dn}">Confirmer : tout décocher pour vous deux</button><button class="btn ghost" data-act="cancel">Annuler</button>` : `<button class="btn ghost" data-act="ask" data-v="uncheck">Tout décocher</button>`}</div>
-  <div class="cols">${missBlock}${["magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].map(block).join("")}</div>
+  <div class="cols">${missBlock}${["albi", "magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].map(block).join("")}</div>
   <div class="note" style="margin-top:14px">Le poisson est prévu le soir même des jours de courses. Si une viande ou un poisson porte la mention « congèle », mets la portion concernée au congélateur en rentrant et sors-la au frigo la veille.</div>`;
 }
 function listText(c) {
@@ -1585,8 +1588,9 @@ function listText(c) {
   let out = `Courses du ${fmtDate(cc.dn)} (repas du ${fmtDate(cc.from, { short: true })} au ${fmtDate(cc.to, { short: true })})\n`;
   const act = missingActive();
   if (act.length) out += `\nIL MANQUE\n` + act.map(m => `- ${m.name}`).join("\n") + "\n";
-  ["magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].forEach(s => {
-    const its = list.filter(it => storeOf(ING[it.k]) === s);
+  const atAlbi = isAlbiCourse(cc.dn);
+  ["albi", "magasin", "boucher", "poissonnier", "boulangerie", "placard", "autre"].forEach(s => {
+    const its = list.filter(it => (atAlbi ? "albi" : storeOf(ING[it.k])) === s);
     if (!its.length) return;
     out += `\n${T[s].toUpperCase()}\n` + its.map(it => `- ${ING[it.k].n} : ${fmtBuy(it)}${it.hint ? " (" + it.hint + ")" : ""}`).join("\n") + "\n";
   });
@@ -1805,7 +1809,9 @@ function vSettings() {
     <div class="field" style="margin-top:10px"><label class="pill${S.choco ? " on" : ""}"><input type="checkbox" data-set="choco"${S.choco ? " checked" : ""}>Garder la chocolatine du samedi</label></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.leftovers ? " on" : ""}"><input type="checkbox" data-set="leftovers"${S.leftovers ? " checked" : ""}>Restes du dîner pour mon midi (lun., mar., jeu., ven.)</label></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.snack ? " on" : ""}"><input type="checkbox" data-set="snack"${S.snack ? " checked" : ""}>Prendre un goûter à 16 h</label><span class="help">Sans goûter, les compléments de prise de masse vont au midi et au soir.</span></div>
-    <div class="field" style="margin-top:10px"><label class="pill${S.albi ? " on" : ""}"><input type="checkbox" data-set="albi"${S.albi ? " checked" : ""}>Week-ends à Albi par défaut</label><span class="help">Départ le vendredi, retour le dimanche soir, tous les deux. Pas de repas ni de courses pendant ce temps, la grande course passe au lundi, et un dîner simple est prévu au retour. Chaque week-end se change dans la semaine.</span></div>
+    <div class="field" style="margin-top:10px"><label class="pill${S.albi ? " on" : ""}"><input type="checkbox" data-set="albi"${S.albi ? " checked" : ""}>Week-ends à Albi par défaut</label><span class="help">Départ le vendredi, retour le dimanche soir, tous les deux. Pas de repas à la maison pendant ce temps, et un dîner simple est prévu au retour. Chaque week-end se change dans la semaine.</span></div>
+    <div class="field" style="margin-top:10px"><label class="pill${S.albiShopSat ? " on" : ""}"><input type="checkbox" data-set="albiShopSat"${S.albiShopSat ? " checked" : ""}>Faire les courses du samedi à Albi</label><span class="help">Sinon, la grande course passe au lundi soir à Toulouse.</span></div>
+    <div class="field" style="margin-top:10px"><label for="s-albiStore">Magasin à Albi</label><input type="text" id="s-albiStore" data-set="albiStore" value="${esc(S.albiStore)}"></div>
    </section>
    <section class="card"><h2>Courses</h2>
     <div class="field"><label for="s-store">Ton magasin principal</label><input type="text" id="s-store" data-set="store" value="${esc(S.store)}"></div>
@@ -1892,7 +1898,7 @@ document.addEventListener("change", e => {
   if (t.dataset.act === "ym") { const [y, m] = t.value.split("-").map(Number); st.ym = [y, m]; return render(); }
   const k = t.dataset.set; if (!k) return;
   if (k === "sport" || k === "exclude") { const v = k === "sport" ? +t.value : t.value; const arr = new Set(S[k]); t.checked ? arr.add(v) : arr.delete(v); S[k] = [...arr].sort(); }
-  else if (["choco", "leftovers", "twoShops", "longOk", "snack", "albi"].includes(k)) S[k] = t.checked;
+  else if (["choco", "leftovers", "twoShops", "longOk", "snack", "albi", "albiShopSat"].includes(k)) S[k] = t.checked;
   else if (["shop1", "shop2", "maxWeek", "maxWeekend"].includes(k)) S[k] = +t.value;
   else if (["weight", "kcal", "fT", "fA"].includes(k)) { const n = parseFloat(t.value); if (!isFinite(n)) return; S[k] = n; }
   else S[k] = t.value;
