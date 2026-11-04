@@ -1130,7 +1130,7 @@ function vWeek() {
     <div class="row"><button class="btn" data-act="wk" data-v="-7" aria-label="Semaine précédente">←</button><button class="btn" data-act="wk" data-v="0">Cette semaine</button><button class="btn" data-act="wk" data-v="7" aria-label="Semaine suivante">→</button></div></div>
   <div class="stats">${stats}</div>
   <div class="days">${days.map(dayCard).join("")}</div>
-  <div class="legend">${["pg", "pm", "vo", "rg", "le", "oe", "b", "c"].map(c => `<span><span class="dot c-${c}"></span>${CAT[c]}</span>`).join("")}</div>
+  <div class="legend">${["pg", "pm", "vo", "rg", "le", "oe", "b"].concat(S.snack ? ["c"] : []).map(c => `<span><span class="dot c-${c}"></span>${CAT[c]}</span>`).join("")}</div>
   <p class="small muted">Touche un repas pour voir la recette, les quantités et le changer. Calories et protéines : estimation de ta journée (ta portion × ${S.fT.toLocaleString("fr-FR")}), objectif ${nf(S.kcal)} kcal et ${protTarget()} g.</p>`;
 }
 
@@ -1372,7 +1372,8 @@ function monthText() {
 
 /* ---- Recettes ---- */
 function vRecipes() {
-  const types = [["d", "Dîners"], ["l", "Midis"], ["b", "Petits-déj sport"], ["c", "Goûters"]];
+  const types = [["d", "Dîners"], ["l", "Midis"], ["b", "Petits-déj sport"]].concat(S.snack ? [["c", "Goûters"]] : []);
+  if (!types.some(([k]) => k === st.rt)) st.rt = "d";
   const q = st.rq.trim().toLowerCase();
   const list = RS.filter(r => r.t === st.rt && (!st.rs || r.s.includes(st.rs)) && (!q || r.name.toLowerCase().includes(q) || r.ings.some(([k]) => ING[k].n.toLowerCase().includes(q))));
   const f = st.rt === "d" || st.rt === "l" ? S.fT : 1;

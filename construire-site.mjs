@@ -85,7 +85,15 @@ const shim = `
     const b = document.getElementById("syncReset");
     if (b) b.onclick = () => { ["tds:foyer", "tds:me", "tds:syncLater"].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} }); location.reload(); };
   });
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    // une nouvelle version publiée remplace l'ancienne : on recharge une fois pour l'afficher tout de suite
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(reg => {
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
 })();
 `;
 
@@ -129,7 +137,7 @@ self.addEventListener("fetch", e => {
   if (e.request.method !== "GET" || u.hostname.endsWith("googleapis.com") && !u.hostname.startsWith("fonts.")) return;
   const local = u.origin === location.origin;
   if (local && (e.request.mode === "navigate" || u.pathname.endsWith(".js") || u.pathname.endsWith(".html"))) {
-    e.respondWith(fetch(e.request).then(r => { const cp = r.clone(); caches.open(C).then(c => c.put(e.request, cp)); return r; }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("index.html"))));
+    e.respondWith(fetch(e.request, { cache: "no-store" }).then(r => { const cp = r.clone(); caches.open(C).then(c => c.put(e.request, cp)); return r; }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("index.html"))));
     return;
   }
   if (local || u.hostname === "www.gstatic.com" || u.hostname.startsWith("fonts.")) {
