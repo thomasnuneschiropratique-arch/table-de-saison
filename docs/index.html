@@ -12,7 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="config.js?v=mw2bqrr6"></script>
+<script src="config.js?v=mw2bth4r"></script>
 <script>
 (function () {
   const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -934,7 +934,8 @@ function avail(k, d) { let s = 0; for (const l of CACHE.pan[k] || []) if (l.exp 
 function soonest(k, d) { let m = 99; for (const l of CACHE.pan[k] || []) if (l.exp >= d && l.q > 1e-6) m = Math.min(m, l.exp - d); return m; }
 function take(k, q, d, slot, day) {
   if (q <= 1e-9) return;
-  if (!day.used.some(u => u.k === k && u.slot === slot)) day.used.push({ k, slot });
+  const u0 = day.used.find(u => u.k === k && u.slot === slot);
+  if (u0) u0.q += q; else day.used.push({ k, slot, q });
   const L = (CACHE.pan[k] || []).filter(l => l.q > 1e-6 && l.exp >= d).sort((a, b) => a.exp - b.exp);
   let rest = q;
   for (const l of L) { const u = Math.min(l.q, rest); l.q -= u; rest -= u; if (rest <= 1e-6) break; }
@@ -1060,7 +1061,7 @@ function simDay(d) {
   const fl = fruitsFor(d), fq = k => FRUIT_Q[k] || 1;
   const nL = day.l ? (day.left ? 1 : (pl.me ? 1 : 0) + (pl.anna ? 1 : 0)) : 0, nD = day.d ? (pdn.me ? 1 : 0) + (pdn.anna ? 1 : 0) : 0;
   day.fl = nL ? fl.find(k => avail(k, d) >= 0.2) || fl[(d * 3) % fl.length] : null;
-  if (day.fl) { take(day.fl, need(day.fl, fq(day.fl) * nL), d, "f", day); if (pl.me) day.th.push([day.fl, fq(day.fl)]); }
+  if (day.fl) { take(day.fl, need(day.fl, fq(day.fl) * nL), d, "fl", day); if (pl.me) day.th.push([day.fl, fq(day.fl)]); }
   const alt = fl.filter(k => k !== day.fl);
   day.fd = nD ? alt.find(k => avail(k, d) >= 0.2) || (alt.length ? alt[(d * 3) % alt.length] : fl[0]) : null;
   if (day.fd) { take(day.fd, need(day.fd, fq(day.fd) * nD), d, "f", day); if (pdn.me) day.th.push([day.fd, fq(day.fd)]); }
@@ -1129,7 +1130,12 @@ function courseFor(dn) {
   let x = a - 1; while (!sd.includes(wdOf(x))) x--;
   return { dn: a, from: a, to: b - 1, next: b, prev: x };
 }
-const SLOT = { b: "matin", l: "midi", c: "goûter", d: "soir", f: "dessert", a: "complément" };
+const SLOT = { b: "matin", l: "midi", fl: "dessert du midi", c: "goûter", d: "soir", f: "dessert du soir", a: "complément" };
+const SLOT_ORDER = ["b", "l", "fl", "c", "d", "f", "a"];
+/* Heure à partir de laquelle un repas est considéré comme passé */
+const SLOT_END = { b: 10, l: 14, fl: 14, c: 17, d: 21, f: 21, a: 21 };
+function todayDn() { const n = new Date(); return dnOf(n.getFullYear(), n.getMonth(), n.getDate()); }
+function isPast(dn, slot) { const t = todayDn(); return dn < t || dn === t && new Date().getHours() >= SLOT_END[slot]; }
 function storeOf(i) {
   if (S.where && S.where[i.k] === "autre") return "autre";
   if (i.s) return "placard";
@@ -1140,7 +1146,7 @@ function storeOf(i) {
 }
 function keepDays(k) { const i = ING[k]; if (i.r === "po" || HACHE.includes(k)) return 1; if (["poulet_filet", "poulet_cuisse", "dinde", "canard"].includes(k)) return 2; return 3; }
 /* Ce qu'il faut acheter : uniquement ce qui manque au frigo ou au placard, en paquets entiers */
-function shopList(from, to, buyDn) {
+function shopList(from, to, buyDn, cut) {
   ensure(to);
   const items = {};
   for (let dn = Math.max(from, EPOCH); dn <= to; dn++) {
@@ -1151,7 +1157,16 @@ function shopList(from, to, buyDn) {
   }
   // tous les repas de la période qui utilisent ce que tu achètes (pas seulement le premier)
   for (let dn = Math.max(from, EPOCH); dn <= to; dn++) CACHE.days[dn - EPOCH].used.forEach(u => { const it = items[u.k]; if (it && !it.uses.some(x => x.dn === dn && x.slot === u.slot)) it.uses.push({ dn, slot: u.slot }); });
-  return Object.values(items).map(it => {
+  let out = Object.values(items);
+  // course en cours : on ne garde que ce qui sert aux repas encore à venir
+  if (cut) out = out.filter(it => {
+    const fut = it.uses.filter(u => !isPast(u.dn, u.slot));
+    if (!fut.length) return false;
+    if (!it.n) { const fq = fut.reduce((s, u) => s + ((CACHE.days[u.dn - EPOCH].used.find(x => x.k === it.k && x.slot === u.slot) || {}).q || 0), 0); it.q = Math.min(it.q, fq); }
+    it.uses = fut;
+    return it.n > 0 || it.q > 0.5;
+  });
+  return out.map(it => {
     const late = ING[it.k].r === "bo" || ING[it.k].r === "po" ? it.uses.filter(u => u.dn - buyDn > keepDays(it.k)) : [];
     it.hint = late.length ? "Congèle la part de " + [...new Set(late.map(u => fmtDate(u.dn, { short: true, noMonth: true })))].join(", ") : "";
     return it;
@@ -1478,13 +1493,16 @@ const STORE_TITLE = () => ({ magasin: S.store, boucher: "Boucher", poissonnier: 
 const ALT = { tahini: "magasin bio ou rayon du monde", sarrasin: "magasin bio ou rayon bio", ras: "rayon épices ou épicerie orientale", lentilles_corail: "rayon bio ou vrac", quinoa: "rayon bio ou vrac", nouilles_riz: "rayon asiatique", cacahuete: "rayon bio (100 % cacahuètes)", espelette: "rayon épices", lait_coco: "rayon asiatique", fruits_rouges: "rayon surgelés ou Picard", petits_pois: "rayon surgelés ou Picard", sardines_bt: "rayon conserves", maquereau_bt: "rayon conserves", dattes: "rayon fruits secs ou épicerie orientale", graines_courge: "rayon bio ou vrac", sesame: "rayon bio ou vrac", flocons: "rayon petit-déjeuner ou bio" };
 function vCourses() {
   const c = courseFor(st.course);
-  const list = shopList(c.from, c.to, c.dn);
+  const live = todayDn() >= c.from && todayDn() <= c.to;
+  const list = shopList(c.from, c.to, c.dn, live);
+  const pastNow = live ? ["l", "d"].filter(x => isPast(todayDn(), x)) : [];
+  const cutNote = live && (todayDn() > c.from || isPast(todayDn(), "b")) ? `<p class="small" style="margin:4px 0 0"><b>Mise à jour à ${new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</b> : les repas déjà passés${pastNow.length ? " (jusqu'à " + (pastNow.includes("d") ? "ce soir" : "ce midi") + ")" : ""} ne sont plus comptés.</p>` : "";
   const groups = { magasin: [], boucher: [], poissonnier: [], boulangerie: [], placard: [], autre: [] };
   list.forEach(it => groups[storeOf(ING[it.k])].push(it));
   const order = Object.keys(RAYONS);
   const sortIt = (a, b) => order.indexOf(ING[a.k].r) - order.indexOf(ING[b.k].r) || ING[a.k].n.localeCompare(ING[b.k].n, "fr");
   const row = it => {
-    const byDay = []; it.uses.slice().sort((x, y) => x.dn - y.dn || "blcdfa".indexOf(x.slot) - "blcdfa".indexOf(y.slot)).forEach(u => { const last = byDay[byDay.length - 1]; if (last && last.dn === u.dn) { if (!last.s.includes(SLOT[u.slot])) last.s.push(SLOT[u.slot]); } else byDay.push({ dn: u.dn, s: [SLOT[u.slot]] }); });
+    const byDay = []; it.uses.slice().sort((x, y) => x.dn - y.dn || SLOT_ORDER.indexOf(x.slot) - SLOT_ORDER.indexOf(y.slot)).forEach(u => { const last = byDay[byDay.length - 1]; if (last && last.dn === u.dn) { if (!last.s.includes(SLOT[u.slot])) last.s.push(SLOT[u.slot]); } else byDay.push({ dn: u.dn, s: [SLOT[u.slot]] }); });
     const uses = byDay.slice(0, 5).map(x => fmtDate(x.dn, { short: true, noMonth: true }) + " " + x.s.join(" et "));
     const ck = checkOf(c.dn, it.k);
     return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc(uses.join(" · "))}${byDay.length > 5 ? " · …" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
@@ -1515,6 +1533,7 @@ function vCourses() {
     <div class="row between"><h2>Courses du ${fmtDate(c.dn)}</h2>
       <div class="row"><button class="btn" data-act="course" data-v="${c.prev}" aria-label="Course précédente">←</button><button class="btn" data-act="course" data-v="${TODAY}">Prochaine</button><button class="btn" data-act="course" data-v="${c.next}" aria-label="Course suivante">→</button></div></div>
     <p class="muted" style="margin:0">Pour les repas du ${fmtDate(c.from, { short: true })} au ${fmtDate(c.to, { short: true })}. La liste ne contient que ce qui manque : les paquets déjà ouverts au frigo ou au placard sont utilisés d'abord.</p>
+    ${cutNote}
     <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${got}" aria-label="Articles pris"><span style="width:${pct}%"></span></div>
     <div class="small num"><b>${got} / ${total}</b> articles pris${got === total && total ? " : tout est dans le caddie" : ""}</div>
   </div>
@@ -1523,7 +1542,7 @@ function vCourses() {
   <div class="note" style="margin-top:14px">Le poisson est prévu le soir même des jours de courses. Si une viande ou un poisson porte la mention « congèle », mets la portion concernée au congélateur en rentrant et sors-la au frigo la veille.</div>`;
 }
 function listText(c) {
-  const cc = courseFor(c), list = shopList(cc.from, cc.to, cc.dn), T = STORE_TITLE();
+  const cc = courseFor(c), list = shopList(cc.from, cc.to, cc.dn, todayDn() >= cc.from && todayDn() <= cc.to), T = STORE_TITLE();
   let out = `Courses du ${fmtDate(cc.dn)} (repas du ${fmtDate(cc.from, { short: true })} au ${fmtDate(cc.to, { short: true })})\n`;
   const act = missingActive();
   if (act.length) out += `\nIL MANQUE\n` + act.map(m => `- ${m.name}`).join("\n") + "\n";
@@ -1841,6 +1860,20 @@ const h = (location.hash || "").slice(1);
 if (VIEWS.includes(h)) st.view = h;
 render();
 startSync();
+/* La liste suit l'heure : un repas passé disparaît des courses, et l'app se recharge au changement de jour */
+let timeKeyLast = timeKey();
+function timeKey() { const d = new Date(); return d.toDateString() + "|" + Object.values(SLOT_END).filter(h => d.getHours() >= h).length; }
+function onTick() {
+  const k = timeKey();
+  if (k === timeKeyLast) return;
+  const dayChanged = k.split("|")[0] !== timeKeyLast.split("|")[0];
+  timeKeyLast = k;
+  if (dayChanged) { location.reload(); return; }
+  const ae = document.activeElement;
+  if (!$("#modalRoot").innerHTML && !(ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))) render();
+}
+setInterval(onTick, 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") onTick(); });
 if (st.view === "semaine") { const el = document.getElementById("d" + TODAY); if (el && window.innerWidth < 700) el.scrollIntoView({ block: "start" }); }
 </script>
 
