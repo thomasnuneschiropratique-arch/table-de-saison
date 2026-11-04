@@ -12,7 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="config.js?v=mw28j38y"></script>
+<script src="config.js?v=mw28wmr8"></script>
 <script>
 (function () {
   const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -185,6 +185,10 @@ main{padding-block:18px 60px}
 .tag.sport{background:var(--sun-soft);color:var(--sun)}
 .tag.shop{background:var(--soft);color:var(--accent)}
 .tag.now{background:var(--accent);color:var(--accent-ink)}
+.tag.away{background:var(--soft);color:var(--warn)}
+.who-btn{align-self:flex-start;font-size:13px;padding:4px 8px;color:var(--muted)}
+table.abs th{background:transparent;font-size:13px;text-transform:none;letter-spacing:0;color:var(--ink);position:static}
+table.abs td,table.abs th{border-bottom:1px solid var(--line);padding:8px 10px}
 .dkcal{margin-left:auto;font-size:12px;color:var(--muted)}
 .meals{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
 .meal{display:grid;grid-template-columns:54px 1fr;gap:8px;align-items:start}
@@ -859,11 +863,11 @@ const ADDONS = [
   { t: "un yaourt grec (150 g) en dessert", ing: [["yaourt_grec", 150]], stock: ["yaourt_grec"], p: 1 },
   { t: "un grand verre de lait (300 ml)", ing: [["lait", 300]], stock: ["lait"], p: 1 },
   { t: "un bol de lait chaud avec 40 g de flocons d'avoine", ing: [["lait", 250], ["flocons", 40]], stock: ["lait"], p: 1 },
-  { t: "2 œufs durs avec ton midi", ing: [["oeuf", 2]], p: 1 },
+  { t: "2 œufs durs avec ton midi", ing: [["oeuf", 2]], p: 1, w: "l" },
   { t: "une boîte de sardines sur une tartine de pain complet", ing: [["sardines_bt", 1], ["pain", 50]], p: 1 },
   { t: "30 g de comté avec ton pain", ing: [["comte", 30]], p: 1 },
-  { t: "80 g de pain complet au dîner", ing: [["pain", 80]] },
-  { t: "une poignée d'amandes (30 g) après le dîner", ing: [["amandes", 30]] },
+  { t: "80 g de pain complet au dîner", ing: [["pain", 80]], w: "d" },
+  { t: "une poignée d'amandes (30 g) après le dîner", ing: [["amandes", 30]], w: "d" },
   { t: "une poignée de noix (25 g) dans ta salade", ing: [["noix", 25]] },
   { t: "une banane et 15 g de beurre de cacahuète en dessert", ing: [["banane", 1], ["cacahuete", 15]] },
   { t: "1 c. à soupe d'huile de colza sur tes légumes", ing: [["huile_colza", 1]] },
@@ -876,6 +880,14 @@ function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.p
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 let S = Object.assign({}, DEF, load("tds:settings", {}));
 let SWAPS = load("tds:swaps", {});
+/* Absences : qui mange à la maison, par jour et par repas. Par défaut : petit-déj et midi pour toi, dîner pour vous deux */
+let AB = load("tds:abs", {});
+const DEFAULT_PRES = { b: { me: true, anna: false }, l: { me: true, anna: false }, d: { me: true, anna: true } };
+function presence(dn, slot) { const o = AB[dn + "|" + slot]; return o ? { me: !!o.me, anna: !!o.anna } : DEFAULT_PRES[slot]; }
+const isDefaultPres = (dn, slot) => !AB[dn + "|" + slot];
+const hasAbs = dn => ["b", "l", "d"].some(s => !isDefaultPres(dn, s));
+/* Repas pris à l'extérieur : estimation pour ta journée (kcal, protéines) */
+const OUTSIDE = { b: [450, 15], l: [850, 40], d: [850, 40] };
 
 /* ============ Dates (numéro de jour UTC, lundi = 0) ============ */
 const DAY = 864e5;
@@ -988,59 +1000,71 @@ function simDay(d) {
   const mine = (r, f) => r && r.ings.forEach(([k, q]) => day.th.push([k, q * f]));
   const one = () => 1, mineF = () => S.fT;
 
+  // Qui mange à la maison à chaque repas (réglé jour par jour dans « Qui mange à la maison ? »)
+  const pb = presence(d, "b"), pl = presence(d, "l"), pdn = presence(d, "d");
+  day.pres = { b: pb, l: pl, d: pdn };
+  day.out = []; // tes repas pris à l'extérieur : comptés dans ta journée avec une estimation
+  const srvOf = p => (p.me ? S.fT : 0) + (p.anna ? S.fA : 0);
+
   // Matin : petit-déjeuner les jours de sport
-  if (day.sport) {
+  if (day.sport && pb.me) {
     const choco = S.choco && wd === 5 && !excluded(RBYID.chocolatine);
     day.b = swapOf(d, "b") || (choco ? RBYID.chocolatine : pick("b", null, d, rng, one));
     commit(day.b, d); eat(day.b, 1, "b"); mine(day.b, 1);
-  }
-  // Midi : restes du dîner d'hier ou repas rapide
-  const prev = d > EPOCH ? CACHE.days[d - 1 - EPOCH].d : null;
+  } else if (day.sport) day.out.push("b");
+  // Midi : restes du dîner d'hier ou repas rapide, pour qui est là
+  const pday = d > EPOCH ? CACHE.days[d - 1 - EPOCH] : null;
   const swL = swapOf(d, "l");
-  day.left = !!(!swL && S.leftovers && LEFT_DAYS.includes(wd) && prev && prev.b);
-  if (day.left) day.l = prev;
-  else {
+  day.srvL = srvOf(pl);
+  day.left = !!(!swL && pday && pday.extra && pday.d);
+  if (day.left) day.l = pday.d;
+  else if (day.srvL > 0) {
+    const srvL = () => day.srvL;
     let r = swL;
     if (!r) {
       const wts = { le: 3, oe: 2, vo: 2, pg: 1, pm: 1, rg: 1 };
       wts[plan.cats[wd]] = 0;
-      if (CACHE.redW + 130 * S.fT > 500) wts.rg = 0;
-      r = pick("l", weighted(rng, wts), d, rng, mineF);
-      if (!r || CACHE.redW + redGrams(r) * S.fT > 500) r = pick("l", "le", d, rng, mineF) || pick("l", "oe", d, rng, mineF) || pick("l", null, d, rng, mineF);
+      if (pl.me && CACHE.redW + 130 * S.fT > 500) wts.rg = 0;
+      r = pick("l", weighted(rng, wts), d, rng, srvL);
+      if (!r || pl.me && CACHE.redW + redGrams(r) * S.fT > 500) r = pick("l", "le", d, rng, srvL) || pick("l", "oe", d, rng, srvL) || pick("l", null, d, rng, srvL);
     }
-    day.l = commit(r, d); eat(r, S.fT, "l");
-  }
-  mine(day.l, S.fT);
-  if (day.l) CACHE.redW += redGrams(day.l) * S.fT;
+    day.l = commit(r, d); eat(r, day.srvL, "l");
+  } else day.l = null;
+  if (pl.me) { mine(day.l, S.fT); if (day.l) CACHE.redW += redGrams(day.l) * S.fT; } else day.out.push("l");
   // Goûter
   day.c = S.snack ? commit(swapOf(d, "c") || pick("c", null, d, rng, one), d) : null;
   eat(day.c, 1, "c"); mine(day.c, 1);
-  // Soir avec Anna
-  const leftT = r => !!(S.leftovers && LEFT_DAYS.includes((wd + 1) % 7) && r && r.b && !SWAPS[(d + 1) + "|l"]);
-  const srvD = r => S.fA + S.fT + (leftT(r) ? S.fT : 0);
+  // Soir : pour qui est là, et ta gamelle de demain si tu es là ce soir et demain midi comme d'habitude
+  const baseD = srvOf(pdn);
+  const leftT = r => !!(S.leftovers && pdn.me && LEFT_DAYS.includes((wd + 1) % 7) && r && r.b && !SWAPS[(d + 1) + "|l"] && isDefaultPres(d + 1, "l"));
+  const srvD = r => baseD + (leftT(r) ? S.fT : 0);
   const dB = r => (wd === 6 && r.m > 45 ? 25 : 0) + (isHache(r) && !plan.fresh.includes(wd) ? -60 : 0);
-  let r = swapOf(d, "d");
-  if (!r) {
-    const cat = plan.cats[wd];
-    r = pick("d", cat, d, rng, srvD, dB);
-    if (r && cat === "rg" && CACHE.redW + redGrams(r) * S.fT * (leftT(r) && wd < 6 ? 2 : 1) > 500) r = pick("d", "vo", d, rng, srvD, dB);
-    if (!r) r = pick("d", null, d, rng, srvD, dB);
-  }
-  day.d = commit(r, d); day.srvD = srvD(r); day.extra = leftT(r);
-  eat(r, day.srvD, "d"); mine(r, S.fT);
-  CACHE.redW += redGrams(r) * S.fT;
-  // Fruits de saison : d'abord ceux qui restent à la maison
+  if (baseD > 0) {
+    let r = swapOf(d, "d");
+    if (!r) {
+      const cat = plan.cats[wd];
+      r = pick("d", cat, d, rng, srvD, dB);
+      if (r && cat === "rg" && pdn.me && CACHE.redW + redGrams(r) * S.fT * (leftT(r) && wd < 6 ? 2 : 1) > 500) r = pick("d", "vo", d, rng, srvD, dB);
+      if (!r) r = pick("d", null, d, rng, srvD, dB);
+    }
+    day.d = commit(r, d); day.srvD = srvD(r); day.extra = leftT(r);
+    eat(r, day.srvD, "d");
+    if (pdn.me) { mine(r, S.fT); CACHE.redW += redGrams(r) * S.fT; }
+  } else { day.d = null; day.srvD = 0; day.extra = false; }
+  if (!pdn.me) day.out.push("d");
+  // Fruits de saison en dessert, pour chaque personne à table : d'abord ceux qui restent à la maison
   const fl = fruitsFor(d), fq = k => FRUIT_Q[k] || 1;
-  day.fl = fl.find(k => avail(k, d) >= 0.2) || fl[(d * 3) % fl.length];
-  take(day.fl, need(day.fl, fq(day.fl)), d, "f", day); day.th.push([day.fl, fq(day.fl)]);
+  const nL = day.l ? (day.left ? 1 : (pl.me ? 1 : 0) + (pl.anna ? 1 : 0)) : 0, nD = day.d ? (pdn.me ? 1 : 0) + (pdn.anna ? 1 : 0) : 0;
+  day.fl = nL ? fl.find(k => avail(k, d) >= 0.2) || fl[(d * 3) % fl.length] : null;
+  if (day.fl) { take(day.fl, need(day.fl, fq(day.fl) * nL), d, "f", day); if (pl.me) day.th.push([day.fl, fq(day.fl)]); }
   const alt = fl.filter(k => k !== day.fl);
-  day.fd = alt.find(k => avail(k, d) >= 0.2) || (alt.length ? alt[(d * 3) % alt.length] : day.fl);
-  take(day.fd, need(day.fd, fq(day.fd) * 2), d, "f", day); day.th.push([day.fd, fq(day.fd)]);
-  // Bonus prise de masse : en priorité ce qui est déjà ouvert
-  const nut = () => day.th.reduce((a, [k, q]) => { const [x, y] = ingNutr(k, q); a[0] += x; a[1] += y; return a; }, [0, 0]);
-  for (let n = 0; n < 5; n++) {
+  day.fd = nD ? alt.find(k => avail(k, d) >= 0.2) || (alt.length ? alt[(d * 3) % alt.length] : fl[0]) : null;
+  if (day.fd) { take(day.fd, need(day.fd, fq(day.fd) * nD), d, "f", day); if (pdn.me) day.th.push([day.fd, fq(day.fd)]); }
+  // Bonus prise de masse, sur tes repas à la maison : en priorité ce qui est déjà ouvert
+  const nut = () => day.th.reduce((a, [k, q]) => { const [x, y] = ingNutr(k, q); a[0] += x; a[1] += y; return a; }, day.out.reduce((a, s) => [a[0] + OUTSIDE[s][0], a[1] + OUTSIDE[s][1]], [0, 0]));
+  for (let n = 0; n < 5 && (pl.me || pdn.me); n++) {
     const [k, p] = nut(), kd = S.kcal - k, pd = protTarget() - p;
-    const ok = a => !day.addons.includes(a) && !a.ing.some(([x]) => S.exclude.includes(x)) && (a.stock || []).every(x => avail(x, d) >= a.ing.find(i => i[0] === x)[1]);
+    const ok = a => !day.addons.includes(a) && (!a.w || (a.w === "d" ? pdn.me && day.d : pl.me && day.l)) && !a.ing.some(([x]) => S.exclude.includes(x)) && (a.stock || []).every(x => avail(x, d) >= a.ing.find(i => i[0] === x)[1]);
     let c = ADDONS.filter(ok);
     if (pd > 8 && c.some(a => a.p)) c = c.filter(a => a.p);
     else if (!(kd > 150)) break;
@@ -1186,24 +1210,78 @@ function mealBtn(r, dn, slot, meta) {
 const fruitName = k => { const n = ING[k].n; return k === "melon" ? "melon" : n; };
 
 /* ---- Semaine ---- */
+/* Pour qui est ce repas, en clair */
+function whoTxt(p, slot) {
+  if (p.me && p.anna) return slot === "d" ? "avec Anna" : "pour Anna et toi";
+  if (p.me) return slot === "d" ? "pour toi · Anna n'est pas là" : "pour toi";
+  if (p.anna) return slot === "l" ? "pour Anna · tu manges dehors" : "pour Anna · tu n'es pas là";
+  return "";
+}
+function awayTxt(p, slot) {
+  if (slot === "l") return p.anna ? "" : "Tu manges à l'extérieur";
+  return "Personne ne dîne à la maison";
+}
 function dayCard(d) {
   const isT = d.dn === TODAY;
-  const tags = [isT ? `<span class="tag now">Aujourd'hui</span>` : "", d.sport ? `<span class="tag sport">Sport</span>` : "", d.shop ? `<span class="tag shop">Courses</span>` : ""].join("");
-  const bm = d.b ? mealBtn(d.b, d.dn, "b", d.b.choco ? "plaisir du samedi" : "après la séance") : `<span class="fast">Jeûne · eau, thé ou café sans sucre</span>`;
-  const lmeta = d.left ? "restes du dîner d'hier" : (d.l ? timeTxt(d.l) : "");
-  const dmeta = (d.d ? timeTxt(d.d) : "") + (d.extra ? " · fais aussi ta gamelle de demain" : "") + (d.d && (d.d.cat === "pg" || d.d.cat === "pm") && d.shop ? " · poisson du jour" : "");
+  const abs = hasAbs(d.dn);
+  const tags = [isT ? `<span class="tag now">Aujourd'hui</span>` : "", d.sport ? `<span class="tag sport">Sport</span>` : "", d.shop ? `<span class="tag shop">Courses</span>` : "", abs ? `<span class="tag away">Absence</span>` : ""].join("");
+  const bm = d.b ? mealBtn(d.b, d.dn, "b", d.b.choco ? "plaisir du samedi" : "après la séance") : d.sport && !d.pres.b.me ? `<span class="fast">Tu n'es pas à la maison</span>` : `<span class="fast">Jeûne · eau, thé ou café sans sucre</span>`;
+  const lmeta = d.l ? (d.left ? "restes du dîner d'hier" : [isDefaultPres(d.dn, "l") ? "" : whoTxt(d.pres.l, "l"), timeTxt(d.l)].filter(Boolean).join(" · ")) : "";
+  const dmeta = d.d ? [whoTxt(d.pres.d, "d"), timeTxt(d.d)].join(" · ") + (d.extra ? " · fais aussi ta gamelle de demain" : "") + ((d.d.cat === "pg" || d.d.cat === "pm") && d.shop ? " · poisson du jour" : "") : "";
+  const des = [d.fl ? `<b>${fruitName(d.fl)}</b> le midi` : "", d.fd ? `<b>${fruitName(d.fd)}</b> le soir` : ""].filter(Boolean).join(", ");
   return `<article class="day${isT ? " today" : ""}" id="d${d.dn}">
-    <header><h3>${fmtDate(d.dn, { noMonth: false }).replace(/^./, c => c.toUpperCase())}</h3>${tags}<span class="dkcal num">${nf(d.kcal)} kcal · ${d.prot} g prot.</span></header>
+    <header><h3>${fmtDate(d.dn, { noMonth: false }).replace(/^./, c => c.toUpperCase())}</h3>${tags}<span class="dkcal num">${d.out.length ? "≈ " : ""}${nf(d.kcal)} kcal · ${d.prot} g prot.</span></header>
     <ul class="meals">
       <li class="meal"><span class="slot">Matin</span>${bm}</li>
-      <li class="meal"><span class="slot">Midi</span>${mealBtn(d.l, d.dn, "l", lmeta)}</li>
+      <li class="meal"><span class="slot">Midi</span>${d.l ? mealBtn(d.l, d.dn, "l", lmeta) : `<span class="fast">${awayTxt(d.pres.l, "l")}</span>`}</li>
       ${d.c ? `<li class="meal"><span class="slot">16 h</span>${mealBtn(d.c, d.dn, "c", "goûter")}</li>` : ""}
-      <li class="meal"><span class="slot">Soir</span>${mealBtn(d.d, d.dn, "d", "avec Anna · " + dmeta)}</li>
+      <li class="meal"><span class="slot">Soir</span>${d.d ? mealBtn(d.d, d.dn, "d", dmeta) : `<span class="fast">${awayTxt(d.pres.d, "d")}</span>`}</li>
     </ul>
-    <div class="extra">Desserts : <b>${fruitName(d.fl)}</b> le midi, <b>${fruitName(d.fd)}</b> le soir</div>
+    ${des ? `<div class="extra">Desserts : ${des}</div>` : ""}
     ${d.addons.length ? `<div class="boost"><b>Prise de masse :</b> ajoute ${d.addons.map(a => a.t).join(", ")}.</div>` : ""}
     ${d.notes.length ? `<div class="gaspi"><b>Anti-gaspi :</b> ${d.notes.map(n => esc(noteText(n))).join(" · ")}.</div>` : ""}
+    <button class="btn ghost small who-btn" data-act="abs" data-dn="${d.dn}">${abs ? "Modifier qui mange à la maison" : "Qui mange à la maison ?"}</button>
   </article>`;
+}
+/* Écran « Qui mange à la maison ? » */
+function openAbs(dn) {
+  const d = resolve(dn);
+  const row = (slot, label, who) => {
+    const p = presence(dn, slot);
+    return `<tr><th scope="row">${label}</th>${["me", "anna"].map(w => who.includes(w) ? `<td><label class="pill${p[w] ? " on" : ""}"><input type="checkbox" id="ab-${slot}-${w}" data-abs="${slot}-${w}"${p[w] ? " checked" : ""}>${w === "me" ? "Toi" : "Anna"}</label></td>` : `<td class="muted small">—</td>`).join("")}</tr>`;
+  };
+  const until = [...Array(14)].map((_, i) => `<option value="${dn + i}">${i ? "jusqu'au " + fmtDate(dn + i) : "ce jour seulement"}</option>`).join("");
+  $("#modalRoot").innerHTML = `<div class="overlay" data-act="close"><form class="sheet" id="absForm" data-dn="${dn}" role="dialog" aria-modal="true" aria-label="Qui mange à la maison ?">
+    <button class="btn ghost close" type="button" data-act="close">Fermer</button>
+    <div class="eyebrow">${fmtDate(dn)}</div>
+    <h2>Qui mange à la maison ?</h2>
+    <p class="muted small">Décoche les personnes absentes : les repas, les portions, ta gamelle et les courses s'adaptent. Par défaut, tu manges à la maison le midi (et le matin les jours de sport), et vous dînez tous les deux.</p>
+    <div class="tablebox"><table class="abs"><tbody>
+      ${d.sport ? row("b", "Matin", ["me"]) : ""}
+      ${row("l", "Midi", ["me", "anna"])}
+      ${row("d", "Soir", ["me", "anna"])}
+    </tbody></table></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" type="button" data-act="absall" data-v="me">Tu n'es pas là de la journée</button>
+      <button class="btn" type="button" data-act="absall" data-v="anna">Anna n'est pas là de la journée</button>
+      <button class="btn ghost" type="button" data-act="absall" data-v="reset">Comme d'habitude</button>
+    </div>
+    <div class="field" style="margin-top:12px"><label for="absUntil">Appliquer</label><select id="absUntil">${until}</select></div>
+    <div class="row" style="margin-top:14px"><button class="btn primary" type="submit">Enregistrer</button></div>
+  </form></div>`;
+}
+function saveAbs(dn, untilDn) {
+  const f = $("#absForm");
+  for (let x = dn; x <= untilDn; x++) {
+    ["b", "l", "d"].forEach(slot => {
+      const me = f.querySelector(`[data-abs="${slot}-me"]`), an = f.querySelector(`[data-abs="${slot}-anna"]`);
+      if (!me && !an) return;
+      const p = { me: me ? me.checked : DEFAULT_PRES[slot].me, anna: an ? an.checked : DEFAULT_PRES[slot].anna };
+      const def = DEFAULT_PRES[slot];
+      if (p.me === def.me && p.anna === def.anna) delete AB[x + "|" + slot]; else AB[x + "|" + slot] = p;
+    });
+  }
+  save("tds:abs", AB); resetCache(); pushPlan(); closeModal(); render(); toast("Enregistré : repas et courses mis à jour");
 }
 function chip(label, val, state) { return `<span class="chip ${state || ""}"><span class="st"></span>${label} <b>${val}</b></span>`; }
 function vWeek() {
@@ -1213,7 +1291,7 @@ function vWeek() {
   let hero = "";
   if (inWeek) {
     const t = resolve(TODAY);
-    hero = `<section class="tonight"><div><div class="eyebrow">Ce soir avec Anna · ${fmtDate(TODAY)}</div><h2>${esc(t.d.name)}</h2><div class="small" style="opacity:.8">${timeTxt(t.d)}${t.extra ? " · prévois ta gamelle de demain midi" : ""}</div></div><button class="btn" data-act="open" data-id="${t.d.id}" data-dn="${TODAY}" data-slot="d">Voir la recette</button></section>`;
+    if (t.d) hero = `<section class="tonight"><div><div class="eyebrow">Ce soir ${whoTxt(t.pres.d, "d")} · ${fmtDate(TODAY)}</div><h2>${esc(t.d.name)}</h2><div class="small" style="opacity:.8">${timeTxt(t.d)}${t.extra ? " · prévois ta gamelle de demain midi" : ""}</div></div><button class="btn" data-act="open" data-id="${t.d.id}" data-dn="${TODAY}" data-slot="d">Voir la recette</button></section>`;
   }
   const end = st.wk + 6;
   const title = `Semaine du ${fmtDate(st.wk, { noDay: true, noMonth: monthOf(st.wk) === monthOf(end) })} au ${fmtDate(end, { noDay: true })}`;
@@ -1270,7 +1348,7 @@ async function resolveNames(ids) {
 const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function pushPlan() {
   if (!SH.live || SH.readonly) return;
-  const body = { settings: JSON.parse(JSON.stringify(S)), swaps: Object.assign({}, SWAPS), by: ME, at: Date.now() };
+  const body = { settings: JSON.parse(JSON.stringify(S)), swaps: Object.assign({}, SWAPS), absences: JSON.parse(JSON.stringify(AB)), by: ME, at: Date.now() };
   queued("plan/state", () => DB.doc("plan/state").set(body)).catch(failWrite);
 }
 async function startSync() {
@@ -1300,13 +1378,13 @@ async function startSync() {
     settled(snap);
     if (!snap.exists) {
       // première ouverture : on partage tes réglages et tes changements de repas s'il y en a
-      if (!SH.planInit && !snap.metadata.fromCache) { SH.planInit = true; if (!sameJSON(Object.assign({}, DEF, S), DEF) || Object.keys(SWAPS).length) pushPlan(); }
+      if (!SH.planInit && !snap.metadata.fromCache) { SH.planInit = true; if (!sameJSON(Object.assign({}, DEF, S), DEF) || Object.keys(SWAPS).length || Object.keys(AB).length) pushPlan(); }
       return;
     }
     SH.planInit = true;
     const d = snap.data() || {};
-    const ns = Object.assign({}, DEF, JSON.parse(JSON.stringify(d.settings || {}))), nsw = Object.assign({}, d.swaps || {});
-    if (!sameJSON(ns, S) || !sameJSON(nsw, SWAPS)) { S = ns; SWAPS = nsw; save("tds:settings", S); save("tds:swaps", SWAPS); resetCache(); render(); }
+    const ns = Object.assign({}, DEF, JSON.parse(JSON.stringify(d.settings || {}))), nsw = Object.assign({}, d.swaps || {}), nab = JSON.parse(JSON.stringify(d.absences || {}));
+    if (!sameJSON(ns, S) || !sameJSON(nsw, SWAPS) || !sameJSON(nab, AB)) { S = ns; SWAPS = nsw; AB = nab; save("tds:settings", S); save("tds:swaps", SWAPS); save("tds:abs", AB); resetCache(); render(); }
   }, dead);
   render();
 }
@@ -1457,7 +1535,7 @@ function vYear() {
   for (let dn = a; dn <= b; dn++) {
     const d = resolve(dn);
     const lk = (r, slot, extra = "") => r ? `<button class="lk" data-act="open" data-id="${r.id}" data-dn="${dn}" data-slot="${slot}">${esc(r.name)}</button>${extra}` : "";
-    rows += `<tr class="${d.wd === 0 ? "wk " : ""}${dn === TODAY ? "isToday" : ""}"><td class="d">${fmtDate(dn, { short: true, noMonth: true })}</td><td>${d.b ? lk(d.b, "b") : `<span class="fastc">jeûne</span>`}</td><td>${lk(d.l, "l", d.left ? ` <span class="muted">(restes)</span>` : "")}</td>${S.snack ? `<td>${lk(d.c, "c")}</td>` : ""}<td>${lk(d.d, "d")}</td></tr>`;
+    rows += `<tr class="${d.wd === 0 ? "wk " : ""}${dn === TODAY ? "isToday" : ""}"><td class="d">${fmtDate(dn, { short: true, noMonth: true })}</td><td>${d.b ? lk(d.b, "b") : `<span class="fastc">jeûne</span>`}</td><td>${d.l ? lk(d.l, "l", d.left ? ` <span class="muted">(restes)</span>` : !isDefaultPres(dn, "l") ? ` <span class="muted">(${whoTxt(d.pres.l, "l")})</span>` : "") : `<span class="fastc">à l'extérieur</span>`}</td>${S.snack ? `<td>${lk(d.c, "c")}</td>` : ""}<td>${d.d ? lk(d.d, "d", isDefaultPres(dn, "d") ? "" : ` <span class="muted">(${whoTxt(d.pres.d, "d")})</span>`) : `<span class="fastc">personne à la maison</span>`}</td></tr>`;
   }
   return `<div class="row between" style="margin-bottom:12px"><h2 style="font-size:24px">${MOIS[m].replace(/^./, c => c.toUpperCase())} ${y}</h2>
     <div class="row"><label class="small muted" for="ymSel">Mois</label><select id="ymSel" data-act="ym">${months.map(([yy, mm]) => `<option value="${yy}-${mm}"${yy === y && mm === m ? " selected" : ""}>${MOIS[mm]} ${yy}</option>`).join("")}</select><button class="btn" data-act="copymonth">Copier le mois</button></div></div>
@@ -1467,7 +1545,7 @@ function vYear() {
 function monthText() {
   const [y, m] = st.ym; const a = Math.max(dnOf(y, m, 1), EPOCH), b = dnOf(y, m + 1, 1) - 1;
   let out = `Repas de ${MOIS[m]} ${y}\n`;
-  for (let dn = a; dn <= b; dn++) { const d = resolve(dn); out += `\n${fmtDate(dn)}\n  Matin : ${d.b ? d.b.name : "jeûne"}\n  Midi : ${d.l ? d.l.name : ""}${d.left ? " (restes)" : ""}${d.c ? "\n  16 h : " + d.c.name : ""}\n  Soir : ${d.d ? d.d.name : ""}\n`; }
+  for (let dn = a; dn <= b; dn++) { const d = resolve(dn); out += `\n${fmtDate(dn)}\n  Matin : ${d.b ? d.b.name : "jeûne"}\n  Midi : ${d.l ? d.l.name : "à l'extérieur"}${d.left ? " (restes)" : ""}${d.c ? "\n  16 h : " + d.c.name : ""}\n  Soir : ${d.d ? d.d.name : "personne à la maison"}\n`; }
   return out;
 }
 
@@ -1493,8 +1571,9 @@ function openRecipe(id, dn, slot) {
   let serv = 1, servTxt = "1 portion";
   if (dn != null && slot) {
     const d = resolve(+dn);
-    if (slot === "d") { serv = d.srvD; servTxt = d.extra ? "Anna, toi et ta gamelle de demain midi" : "Anna et toi"; }
-    else if (slot === "l") { serv = S.fT; servTxt = d.left ? "ta portion (restes d'hier soir)" : "ta portion"; }
+    const people = p => p.me && p.anna ? "Anna et toi" : p.me ? "toi" : "Anna";
+    if (slot === "d") { serv = d.srvD; servTxt = people(d.pres.d) + (d.extra ? ", plus ta gamelle de demain midi" : ""); }
+    else if (slot === "l") { serv = d.left ? S.fT : d.srvL; servTxt = d.left ? "ta portion (restes d'hier soir)" : people(d.pres.l); }
   } else if (r.t === "d") { serv = S.fA + S.fT; servTxt = "Anna et toi"; }
   else if (r.t === "l") { serv = S.fT; servTxt = "ta portion"; }
   const [k, p] = nutr(r);
@@ -1674,6 +1753,7 @@ function vSettings() {
 
 /* ---- Événements ---- */
 document.addEventListener("submit", e => {
+  if (e.target.id === "absForm") { e.preventDefault(); const dn = +e.target.dataset.dn; return saveAbs(dn, Math.max(dn, +$("#absUntil").value)); }
   if (e.target.id !== "missForm") return;
   e.preventDefault();
   const i = $("#missInput"), v = i.value;
@@ -1694,6 +1774,12 @@ document.addEventListener("click", e => {
   const a = t.dataset.act, v = t.dataset.v;
   if (a === "close") { if (e.target === t || t.tagName === "BUTTON") closeModal(); return; }
   if (a === "open") return openRecipe(t.dataset.id, t.dataset.dn, t.dataset.slot);
+  if (a === "abs") return openAbs(+t.dataset.dn);
+  if (a === "absall") {
+    const f = $("#absForm");
+    f.querySelectorAll("[data-abs]").forEach(cb => { const [slot, w] = cb.dataset.abs.split("-"); cb.checked = v === "reset" ? DEFAULT_PRES[slot][w] : v === w ? false : cb.checked; cb.closest(".pill").classList.toggle("on", cb.checked); });
+    return;
+  }
   if (a === "wk") { st.wk = v === "0" ? mondayOf(TODAY) : Math.max(EPOCH, st.wk + +v); return render(); }
   if (a === "course") { st.course = Math.max(EPOCH, +v); return render(); }
   if (a === "swap" || a === "unswap") {
@@ -1718,6 +1804,7 @@ document.addEventListener("change", e => {
   const t = e.target;
   if (t.dataset.act === "chk") { setCheck(t.dataset.c, t.dataset.k, t.checked); return; }
   if (t.dataset.act === "mchk") { markMissing(t.dataset.id, t.checked); return; }
+  if (t.dataset.abs) { t.closest(".pill").classList.toggle("on", t.checked); return; }
   if (t.dataset.act === "ym") { const [y, m] = t.value.split("-").map(Number); st.ym = [y, m]; return render(); }
   const k = t.dataset.set; if (!k) return;
   if (k === "sport" || k === "exclude") { const v = k === "sport" ? +t.value : t.value; const arr = new Set(S[k]); t.checked ? arr.add(v) : arr.delete(v); S[k] = [...arr].sort(); }
