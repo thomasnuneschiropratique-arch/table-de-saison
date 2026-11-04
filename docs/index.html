@@ -12,7 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="config.js?v=mw277kt4"></script>
+<script src="config.js?v=mw28cx25"></script>
 <script>
 (function () {
   const get = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -779,8 +779,8 @@ miel|23|pot de 500 g|pots de 500 g|365|
 cacahuete|350|pot de 350 g|pots de 350 g|120|
 tahini|300|pot de 300 g|pots de 300 g|365|
 amandes|200|sachet de 200 g|sachets de 200 g|120|
-noix|200|sachet de 200 g|sachets de 200 g|90|
-graines_courge|200|sachet de 200 g|sachets de 200 g|150|
+noix|200|sachet de 200 g|sachets de 200 g|150|
+graines_courge|200|sachet de 200 g|sachets de 200 g|240|
 sesame|150|sachet de 150 g|sachets de 150 g|730|
 chocolat|100|tablette de 100 g|tablettes de 100 g|240|
 dattes|250|barquette de 250 g|barquettes de 250 g|180|
@@ -793,7 +793,7 @@ ras|20|pot|pots|730|
 herbes|20|pot|pots|730|
 espelette|20|pot|pots|730|
 cannelle|20|pot|pots|730|
-fruits_rouges|500|sachet surgelé de 500 g|sachets surgelés de 500 g|120|
+fruits_rouges|500|sachet surgelé de 500 g|sachets surgelés de 500 g|240|
 petits_pois|1000|sachet surgelé de 1 kg|sachets surgelés de 1 kg|365|
 persil|1|botte|bottes|5|f
 coriandre|1|botte|bottes|5|f
@@ -851,18 +851,19 @@ const ADDONS = [
   { t: "un yaourt grec (150 g) en dessert", ing: [["yaourt_grec", 150]], stock: ["yaourt_grec"], p: 1 },
   { t: "un grand verre de lait (300 ml)", ing: [["lait", 300]], stock: ["lait"], p: 1 },
   { t: "un bol de lait chaud avec 40 g de flocons d'avoine", ing: [["lait", 250], ["flocons", 40]], stock: ["lait"], p: 1 },
-  { t: "2 œufs durs au goûter", ing: [["oeuf", 2]], p: 1 },
+  { t: "2 œufs durs avec ton midi", ing: [["oeuf", 2]], p: 1 },
   { t: "une boîte de sardines sur une tartine de pain complet", ing: [["sardines_bt", 1], ["pain", 50]], p: 1 },
   { t: "30 g de comté avec ton pain", ing: [["comte", 30]], p: 1 },
   { t: "80 g de pain complet au dîner", ing: [["pain", 80]] },
-  { t: "une poignée d'amandes (30 g)", ing: [["amandes", 30]] },
-  { t: "une banane et 15 g de beurre de cacahuète", ing: [["banane", 1], ["cacahuete", 15]] },
+  { t: "une poignée d'amandes (30 g) après le dîner", ing: [["amandes", 30]] },
+  { t: "une poignée de noix (25 g) dans ta salade", ing: [["noix", 25]] },
+  { t: "une banane et 15 g de beurre de cacahuète en dessert", ing: [["banane", 1], ["cacahuete", 15]] },
   { t: "1 c. à soupe d'huile de colza sur tes légumes", ing: [["huile_colza", 1]] },
   { t: "40 g de flocons d'avoine dans ton yaourt grec", ing: [["flocons", 40], ["yaourt_grec", 100]], stock: ["yaourt_grec"] }
 ];
 
 /* ============ Réglages ============ */
-const DEF = { maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: true, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
+const DEF = { snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: true, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 let S = Object.assign({}, DEF, load("tds:settings", {}));
@@ -1004,7 +1005,8 @@ function simDay(d) {
   mine(day.l, S.fT);
   if (day.l) CACHE.redW += redGrams(day.l) * S.fT;
   // Goûter
-  day.c = commit(swapOf(d, "c") || pick("c", null, d, rng, one), d); eat(day.c, 1, "c"); mine(day.c, 1);
+  day.c = S.snack ? commit(swapOf(d, "c") || pick("c", null, d, rng, one), d) : null;
+  eat(day.c, 1, "c"); mine(day.c, 1);
   // Soir avec Anna
   const leftT = r => !!(S.leftovers && LEFT_DAYS.includes((wd + 1) % 7) && r && r.b && !SWAPS[(d + 1) + "|l"]);
   const srvD = r => S.fA + S.fT + (leftT(r) ? S.fT : 0);
@@ -1028,7 +1030,7 @@ function simDay(d) {
   take(day.fd, need(day.fd, fq(day.fd) * 2), d, "f", day); day.th.push([day.fd, fq(day.fd)]);
   // Bonus prise de masse : en priorité ce qui est déjà ouvert
   const nut = () => day.th.reduce((a, [k, q]) => { const [x, y] = ingNutr(k, q); a[0] += x; a[1] += y; return a; }, [0, 0]);
-  for (let n = 0; n < 4; n++) {
+  for (let n = 0; n < 5; n++) {
     const [k, p] = nut(), kd = S.kcal - k, pd = protTarget() - p;
     const ok = a => !day.addons.includes(a) && !a.ing.some(([x]) => S.exclude.includes(x)) && (a.stock || []).every(x => avail(x, d) >= a.ing.find(i => i[0] === x)[1]);
     let c = ADDONS.filter(ok);
@@ -1187,7 +1189,7 @@ function dayCard(d) {
     <ul class="meals">
       <li class="meal"><span class="slot">Matin</span>${bm}</li>
       <li class="meal"><span class="slot">Midi</span>${mealBtn(d.l, d.dn, "l", lmeta)}</li>
-      <li class="meal"><span class="slot">16 h</span>${mealBtn(d.c, d.dn, "c", "goûter")}</li>
+      ${d.c ? `<li class="meal"><span class="slot">16 h</span>${mealBtn(d.c, d.dn, "c", "goûter")}</li>` : ""}
       <li class="meal"><span class="slot">Soir</span>${mealBtn(d.d, d.dn, "d", "avec Anna · " + dmeta)}</li>
     </ul>
     <div class="extra">Desserts : <b>${fruitName(d.fl)}</b> le midi, <b>${fruitName(d.fd)}</b> le soir</div>
@@ -1447,17 +1449,17 @@ function vYear() {
   for (let dn = a; dn <= b; dn++) {
     const d = resolve(dn);
     const lk = (r, slot, extra = "") => r ? `<button class="lk" data-act="open" data-id="${r.id}" data-dn="${dn}" data-slot="${slot}">${esc(r.name)}</button>${extra}` : "";
-    rows += `<tr class="${d.wd === 0 ? "wk " : ""}${dn === TODAY ? "isToday" : ""}"><td class="d">${fmtDate(dn, { short: true, noMonth: true })}</td><td>${d.b ? lk(d.b, "b") : `<span class="fastc">jeûne</span>`}</td><td>${lk(d.l, "l", d.left ? ` <span class="muted">(restes)</span>` : "")}</td><td>${lk(d.c, "c")}</td><td>${lk(d.d, "d")}</td></tr>`;
+    rows += `<tr class="${d.wd === 0 ? "wk " : ""}${dn === TODAY ? "isToday" : ""}"><td class="d">${fmtDate(dn, { short: true, noMonth: true })}</td><td>${d.b ? lk(d.b, "b") : `<span class="fastc">jeûne</span>`}</td><td>${lk(d.l, "l", d.left ? ` <span class="muted">(restes)</span>` : "")}</td>${S.snack ? `<td>${lk(d.c, "c")}</td>` : ""}<td>${lk(d.d, "d")}</td></tr>`;
   }
   return `<div class="row between" style="margin-bottom:12px"><h2 style="font-size:24px">${MOIS[m].replace(/^./, c => c.toUpperCase())} ${y}</h2>
     <div class="row"><label class="small muted" for="ymSel">Mois</label><select id="ymSel" data-act="ym">${months.map(([yy, mm]) => `<option value="${yy}-${mm}"${yy === y && mm === m ? " selected" : ""}>${MOIS[mm]} ${yy}</option>`).join("")}</select><button class="btn" data-act="copymonth">Copier le mois</button></div></div>
-  <div class="tablebox"><table><thead><tr><th>Jour</th><th>Matin</th><th>Midi (toi)</th><th>16 h</th><th>Soir (avec Anna)</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="tablebox"><table><thead><tr><th>Jour</th><th>Matin</th><th>Midi (toi)</th>${S.snack ? "<th>16 h</th>" : ""}<th>Soir (avec Anna)</th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="small muted">Légumes de saison en ${MOIS[m]} : ${VEG_MONTH[m]}. Fruits : ${FRUITS[m].map(k => ING[k].n).join(", ")}.</p>`;
 }
 function monthText() {
   const [y, m] = st.ym; const a = Math.max(dnOf(y, m, 1), EPOCH), b = dnOf(y, m + 1, 1) - 1;
   let out = `Repas de ${MOIS[m]} ${y}\n`;
-  for (let dn = a; dn <= b; dn++) { const d = resolve(dn); out += `\n${fmtDate(dn)}\n  Matin : ${d.b ? d.b.name : "jeûne"}\n  Midi : ${d.l ? d.l.name : ""}${d.left ? " (restes)" : ""}\n  16 h : ${d.c ? d.c.name : ""}\n  Soir : ${d.d ? d.d.name : ""}\n`; }
+  for (let dn = a; dn <= b; dn++) { const d = resolve(dn); out += `\n${fmtDate(dn)}\n  Matin : ${d.b ? d.b.name : "jeûne"}\n  Midi : ${d.l ? d.l.name : ""}${d.left ? " (restes)" : ""}${d.c ? "\n  16 h : " + d.c.name : ""}\n  Soir : ${d.d ? d.d.name : ""}\n`; }
   return out;
 }
 
@@ -1527,7 +1529,7 @@ function vGuide() {
     <li><b>Les journées trop légères</b> reçoivent des ajouts simples (pain complet, lait, yaourt grec, oléagineux), affichés dans chaque jour et comptés dans les courses.</li></ul></section>
 
   <section class="card"><h2>Le jeûne du matin</h2><ul>
-    <li>Il reste compatible avec la prise de masse tant que le total de la journée est atteint. Le goûter de 16 h est là pour ça : ne le saute pas.</li>
+    <li>Il reste compatible avec la prise de masse tant que le total de la journée est atteint. Sans goûter, tout se joue au midi et au soir : tes portions y sont plus grandes, et les journées trop légères reçoivent des compléments (pain complet, œufs, yaourt grec, oléagineux) affichés dans la carte du jour.</li>
     <li>Si tu peines à finir tes assiettes, ajoute un petit-déjeuner plutôt que de te forcer le soir.</li>
     <li>Au réveil : un grand verre d'eau. Café ou thé sans sucre, de préférence loin des repas (ils freinent l'absorption du fer).</li></ul></section>
 
@@ -1545,7 +1547,7 @@ function vGuide() {
     <tr><td>Poisson 2 fois par semaine, dont 1 gras</td><td>Le soir des jours de courses (mercredi et samedi), en alternant gras et maigre.</td></tr>
     <tr><td>Viande hors volaille : 500 g par semaine au plus</td><td>Plafond automatique, restes du midi compris. Compteur dans la semaine.</td></tr>
     <tr><td>Charcuterie : 150 g par semaine au plus</td><td>Aucune au quotidien. Le cassoulet maison n'apparaît que si tu actives les plats mijotés, au plus une fois par mois en hiver.</td></tr>
-    <tr><td>Une petite poignée de fruits à coque par jour</td><td>Amandes, noix et graines dans les goûters et les bowls.</td></tr>
+    <tr><td>Une petite poignée de fruits à coque par jour</td><td>Amandes, noix et graines dans les petits-déj, les bowls et les compléments.</td></tr>
     <tr><td>Produits laitiers : 2 par jour</td><td>Lait, yaourt grec et comté (le seul fromage que tu aimes).</td></tr>
     <tr><td>30 plantes différentes par semaine (diversité du microbiote)</td><td>Rotation des légumes, céréales, légumineuses, fruits et herbes. Compteur dans la semaine.</td></tr>
     <tr><td>Moins de sel et de sucre</td><td>Herbes, épices, citron et moutarde. Aucune sauce industrielle.</td></tr>
@@ -1583,7 +1585,7 @@ function vGuide() {
 
   <section class="card wide"><h2>Zéro gaspillage</h2><ul>
     <li><b>Des paquets entiers</b> : la liste de courses compte en bouteilles, pots, bottes et bocaux réels (lait en bouteille de 1 L, yaourt grec en pot de 500 g, herbes à la botte, légumineuses en bocal). Le vrac (légumes, viande, poisson) est acheté au poids exact.</li>
-    <li><b>L'app suit ton frigo et ton placard</b> jour par jour. Quand un paquet est ouvert, les repas, goûters et petits-déj des jours suivants sont choisis pour le finir avant qu'il ne tourne. Le lait ou le yaourt en bonus n'apparaissent que s'il en reste d'ouvert.</li>
+    <li><b>L'app suit ton frigo et ton placard</b> jour par jour. Quand un paquet est ouvert, les repas et petits-déj des jours suivants sont choisis pour le finir avant qu'il ne tourne. Le lait ou le yaourt en bonus n'apparaissent que s'il en reste d'ouvert.</li>
     <li><b>Ce qui ne se garde pas</b> est signalé le dernier jour, dans la carte du jour : à finir en dessert, en crudités, en soupe, ou à congeler (pain en tranches, herbes hachées, bocaux entamés, lait de coco). Les produits congelés sont réutilisés ensuite.</li>
     <li><b>Le placard</b> n'apparaît dans la liste que quand le paquet précédent est terminé.</li>
     <li>Sur un an de planning, il reste moins de 100 g à jeter, surtout des fonds de graines et d'ail. Le compteur de la semaine l'affiche.</li></ul></section>
@@ -1639,6 +1641,7 @@ function vSettings() {
     <div class="field"><label>Jours de sport (petit-déjeuner ces jours-là, jeûne les autres)</label><div class="checks">${sport}</div></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.choco ? " on" : ""}"><input type="checkbox" data-set="choco"${S.choco ? " checked" : ""}>Garder la chocolatine du samedi</label></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.leftovers ? " on" : ""}"><input type="checkbox" data-set="leftovers"${S.leftovers ? " checked" : ""}>Restes du dîner pour mon midi (lun., mar., jeu., ven.)</label></div>
+    <div class="field" style="margin-top:10px"><label class="pill${S.snack ? " on" : ""}"><input type="checkbox" data-set="snack"${S.snack ? " checked" : ""}>Prendre un goûter à 16 h</label><span class="help">Sans goûter, les compléments de prise de masse vont au midi et au soir.</span></div>
    </section>
    <section class="card"><h2>Courses</h2>
     <div class="field"><label for="s-store">Ton magasin principal</label><input type="text" id="s-store" data-set="store" value="${esc(S.store)}"></div>
@@ -1709,7 +1712,7 @@ document.addEventListener("change", e => {
   if (t.dataset.act === "ym") { const [y, m] = t.value.split("-").map(Number); st.ym = [y, m]; return render(); }
   const k = t.dataset.set; if (!k) return;
   if (k === "sport" || k === "exclude") { const v = k === "sport" ? +t.value : t.value; const arr = new Set(S[k]); t.checked ? arr.add(v) : arr.delete(v); S[k] = [...arr].sort(); }
-  else if (["choco", "leftovers", "twoShops", "longOk"].includes(k)) S[k] = t.checked;
+  else if (["choco", "leftovers", "twoShops", "longOk", "snack"].includes(k)) S[k] = t.checked;
   else if (["shop1", "shop2", "maxWeek", "maxWeekend"].includes(k)) S[k] = +t.value;
   else if (["weight", "kcal", "fT", "fA"].includes(k)) { const n = parseFloat(t.value); if (!isFinite(n)) return; S[k] = n; }
   else S[k] = t.value;
