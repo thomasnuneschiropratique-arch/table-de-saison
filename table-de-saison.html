@@ -833,6 +833,7 @@ function avail(k, d) { let s = 0; for (const l of CACHE.pan[k] || []) if (l.exp 
 function soonest(k, d) { let m = 99; for (const l of CACHE.pan[k] || []) if (l.exp >= d && l.q > 1e-6) m = Math.min(m, l.exp - d); return m; }
 function take(k, q, d, slot, day) {
   if (q <= 1e-9) return;
+  if (!day.used.some(u => u.k === k && u.slot === slot)) day.used.push({ k, slot });
   const L = (CACHE.pan[k] || []).filter(l => l.q > 1e-6 && l.exp >= d).sort((a, b) => a.exp - b.exp);
   let rest = q;
   for (const l of L) { const u = Math.min(l.q, rest); l.q -= u; rest -= u; if (rest <= 1e-6) break; }
@@ -897,7 +898,7 @@ function simDay(d) {
   const plan = CACHE.plan[w] || (CACHE.plan[w] = weekPlan(w));
   if (wd === 0) CACHE.redW = 0;
   const rng = mulberry(d * 7919 + S.seed * 104729 + 17);
-  const day = { dn: d, wd, sport: S.sport.includes(wd), shop: shopDays().includes(wd), buy: [], notes: [], addons: [], th: [] };
+  const day = { dn: d, wd, sport: S.sport.includes(wd), shop: shopDays().includes(wd), buy: [], used: [], notes: [], addons: [], th: [] };
   const eat = (r, f, slot) => r && r.ings.forEach(([k, q]) => take(k, need(k, q * f), d, slot, day));
   const mine = (r, f) => r && r.ings.forEach(([k, q]) => day.th.push([k, q * f]));
   const one = () => 1, mineF = () => S.fT;
@@ -1027,7 +1028,7 @@ function courseFor(dn) {
   let x = a - 1; while (!sd.includes(wdOf(x))) x--;
   return { dn: a, from: a, to: b - 1, next: b, prev: x };
 }
-const SLOT = { b: "matin", l: "midi", c: "goûter", d: "soir", f: "dessert", a: "bonus" };
+const SLOT = { b: "matin", l: "midi", c: "goûter", d: "soir", f: "dessert", a: "complément" };
 function storeOf(i) {
   if (S.where && S.where[i.k] === "autre") return "autre";
   if (i.s) return "placard";
@@ -1045,9 +1046,10 @@ function shopList(from, to, buyDn) {
     CACHE.days[dn - EPOCH].buy.forEach(b => {
       const it = items[b.k] || (items[b.k] = { k: b.k, n: 0, q: 0, uses: [] });
       if (b.n) it.n += b.n; else it.q += b.q;
-      if (!it.uses.some(u => u.dn === dn && u.slot === b.slot)) it.uses.push({ dn, slot: b.slot });
     });
   }
+  // tous les repas de la période qui utilisent ce que tu achètes (pas seulement le premier)
+  for (let dn = Math.max(from, EPOCH); dn <= to; dn++) CACHE.days[dn - EPOCH].used.forEach(u => { const it = items[u.k]; if (it && !it.uses.some(x => x.dn === dn && x.slot === u.slot)) it.uses.push({ dn, slot: u.slot }); });
   return Object.values(items).map(it => {
     const late = ING[it.k].r === "bo" || ING[it.k].r === "po" ? it.uses.filter(u => u.dn - buyDn > keepDays(it.k)) : [];
     it.hint = late.length ? "Congèle la part de " + [...new Set(late.map(u => fmtDate(u.dn, { short: true, noMonth: true })))].join(", ") : "";
@@ -1381,9 +1383,10 @@ function vCourses() {
   const order = Object.keys(RAYONS);
   const sortIt = (a, b) => order.indexOf(ING[a.k].r) - order.indexOf(ING[b.k].r) || ING[a.k].n.localeCompare(ING[b.k].n, "fr");
   const row = it => {
-    const uses = it.uses.filter(u => u.slot !== "a").slice(0, 6).map(u => fmtDate(u.dn, { short: true, noMonth: true }) + " " + SLOT[u.slot]);
+    const byDay = []; it.uses.slice().sort((x, y) => x.dn - y.dn || "blcdfa".indexOf(x.slot) - "blcdfa".indexOf(y.slot)).forEach(u => { const last = byDay[byDay.length - 1]; if (last && last.dn === u.dn) { if (!last.s.includes(SLOT[u.slot])) last.s.push(SLOT[u.slot]); } else byDay.push({ dn: u.dn, s: [SLOT[u.slot]] }); });
+    const uses = byDay.slice(0, 5).map(x => fmtDate(x.dn, { short: true, noMonth: true }) + " " + x.s.join(" et "));
     const ck = checkOf(c.dn, it.k);
-    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc([...new Set(uses)].join(", "))}${it.uses.length > 6 ? "…" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
+    return `<li class="item${ck ? " done" : ""}"><input type="checkbox" id="ck-${c.dn}-${it.k}" data-act="chk" data-k="${it.k}" data-c="${c.dn}"${ck ? " checked" : ""}><label for="ck-${c.dn}-${it.k}">${esc(ING[it.k].n)}<span class="u">${esc(uses.join(" · "))}${byDay.length > 5 ? " · …" : ""}</span>${it.hint ? `<span class="hint">${esc(it.hint)}</span>` : ""}${ALT[it.k] ? `<span class="alt">Introuvable ? ${ALT[it.k]}</span>` : ""}${ck && ck.by ? `<span class="who">pris par ${esc(nameOf(ck.by))}</span>` : ""}</label><span class="q">${fmtBuy(it)}${(() => { const w = storeOf(ING[it.k]); return w === "autre" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="">Remettre à ${esc(S.store)}</button>` : w === "magasin" || w === "placard" ? `<button class="mini" data-act="where" data-k="${it.k}" data-v="autre">Pas trouvé ici</button>` : ""; })()}</span></li>`;
   };
   const T = STORE_TITLE();
   const block = key => {
@@ -1519,7 +1522,8 @@ function vGuide() {
     <li><b>Surplus modéré</b> : 250 à 400 kcal au-dessus de ton maintien. Vise 0,5 à 1,5 kg par mois.</li>
     <li><b>Ajuste sur la balance</b> : pèse-toi 2 à 3 matins par semaine et compare les moyennes. Rien ne bouge en 2 semaines : +200 kcal dans Réglages. Plus de 0,5 kg par semaine : −200 kcal.</li>
     <li><b>Protéines</b> : 1,6 à 2,2 g/kg/jour, réparties sur tes repas (30 à 50 g chacun). L'app vise 1,8 g/kg.</li>
-    <li><b>Les journées trop légères</b> reçoivent des ajouts simples (pain complet, lait, yaourt grec, oléagineux), affichés dans chaque jour et comptés dans les courses.</li></ul></section>
+    <li><b>Les journées trop légères</b> reçoivent des compléments simples au midi ou au soir (pain complet, œufs, lait ou yaourt grec déjà ouverts, oléagineux, banane et beurre de cacahuète), affichés dans chaque jour et comptés dans les courses.</li>
+    <li><b>Les repas pris dehors</b> (séminaire, restaurant) sont comptés avec une estimation d'environ 850 kcal, pour ne pas t'ajouter de compléments inutiles.</li></ul></section>
 
   <section class="card"><h2>Le jeûne du matin</h2><ul>
     <li>Il reste compatible avec la prise de masse tant que le total de la journée est atteint. Sans goûter, tout se joue au midi et au soir : tes portions y sont plus grandes, et les journées trop légères reçoivent des compléments (pain complet, œufs, yaourt grec, oléagineux) affichés dans la carte du jour.</li>
@@ -1574,14 +1578,20 @@ function vGuide() {
     <li><b>Congélation</b> : à plat, en portions. Décongèle au frigo la veille, jamais à température ambiante. La liste de courses signale chaque produit concerné.</li>
     <li><b>Chez le boucher</b> : demande du haché minute, une viande française de race à viande, une volaille Label Rouge ou bio. Il peut préparer et mettre sous vide les portions de la semaine.</li>
     <li><b>Chez le poissonnier</b> : le marché couvert Victor Hugo (ouvert du mardi au dimanche matin) en compte plusieurs. Le planning mise sur la truite et les petits poissons gras (sardine, maquereau) : riches en oméga-3, peu de mercure, des stocks moins menacés. Il n'y a ni saumon ni thon, et évite aussi l'espadon et le requin, les plus chargés en mercure. Demande ce qui est de saison et de ligne, cherche le label MSC.</li>
-    <li><b>Tout au même endroit</b> : ton hypermarché a aussi boucherie et marée. Choisis où acheter viande et poisson dans Réglages, les listes se réorganisent.</li></ul></section>
+    <li><b>Tout au même endroit</b> : ${esc(S.store)} a aussi une boucherie et une poissonnerie. Choisis où acheter viande et poisson dans Réglages, les listes se réorganisent.</li></ul></section>
+
+  <section class="card"><h2>Où faire les courses</h2><ul>
+    <li><b>${esc(S.store)}</b> pour le frais : fruits et légumes, crèmerie, œufs, et viande ou poisson si tu le choisis.</li>
+    <li><b>Un article introuvable ?</b> Touche « Pas trouvé ici » dans la liste : il passe chez ${esc(S.store2 || "ton deuxième magasin")} pour toutes les listes suivantes. Les articles plus rares indiquent où les chercher (magasin bio, rayon du monde, surgelés…).</li>
+    <li><b>Boucher</b> le samedi et <b>poissonnier</b> au marché Victor Hugo, pour les produits du jour.</li>
+    <li><b>Il manque</b> : notez-y le sel, le papier toilette ou ce qui vient à manquer ; ça s'ajoute en haut de la prochaine liste, chez vous deux.</li></ul></section>
 
   <section class="card wide"><h2>Zéro gaspillage</h2><ul>
     <li><b>Des paquets entiers</b> : la liste de courses compte en bouteilles, pots, bottes et bocaux réels (lait en bouteille de 1 L, yaourt grec en pot de 500 g, herbes à la botte, légumineuses en bocal). Le vrac (légumes, viande, poisson) est acheté au poids exact.</li>
     <li><b>L'app suit ton frigo et ton placard</b> jour par jour. Quand un paquet est ouvert, les repas et petits-déj des jours suivants sont choisis pour le finir avant qu'il ne tourne. Le lait ou le yaourt en bonus n'apparaissent que s'il en reste d'ouvert.</li>
     <li><b>Ce qui ne se garde pas</b> est signalé le dernier jour, dans la carte du jour : à finir en dessert, en crudités, en soupe, ou à congeler (pain en tranches, herbes hachées, bocaux entamés, lait de coco). Les produits congelés sont réutilisés ensuite.</li>
     <li><b>Le placard</b> n'apparaît dans la liste que quand le paquet précédent est terminé.</li>
-    <li>Sur un an de planning, il reste moins de 100 g à jeter, surtout des fonds de graines et d'ail. Le compteur de la semaine l'affiche.</li></ul></section>
+    <li>Sur un an de planning, il ne reste quasiment rien à jeter (quelques gousses d'ail). Le compteur « Anti-gaspi » de la semaine l'affiche.</li></ul></section>
 
   <section class="card"><h2>Produits transformés : où est la limite</h2><ul>
     <li><b>Acceptés</b> : pâtes, riz, semoule, flocons d'avoine, pain de boulangerie, légumineuses en bocal (à rincer), tomates en bocal, sardines et maquereau en boîte, surgelés nature, beurre de cacahuète 100 %, lait de coco sans additif.</li>
@@ -1604,7 +1614,8 @@ function vGuide() {
   <section class="card"><h2>Les dîners avec Anna</h2><ul>
     <li>Mêmes recettes pour vous deux, la portion d'Anna se règle à part. Aucune recette ne contient de champignons ni d'olives.</li>
     <li>Aucun fromage à part le comté, utilisé avec modération.</li>
-    <li>Les ajouts « prise de masse » ne concernent que toi.</li></ul></section>
+    <li>Les compléments « prise de masse » ne concernent que toi.</li>
+    <li><b>Quand l'un de vous n'est pas là</b> (séminaire, sortie, déplacement), touche « Qui mange à la maison ? » sous le jour : repas, portions, gamelle et courses s'adaptent, et l'autre téléphone le voit aussi.</li></ul></section>
   <p class="small muted wide">Repères généraux tirés des recommandations françaises de santé publique (PNNS, ANSES). Ils ne remplacent pas l'avis d'un médecin ou d'un diététicien. Valeurs nutritionnelles estimées.</p>
   </div>`;
 }
