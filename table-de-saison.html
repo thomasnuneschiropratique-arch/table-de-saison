@@ -85,6 +85,8 @@ main{padding-block:18px 60px}
 .tag.shop{background:var(--soft);color:var(--accent)}
 .tag.now{background:var(--accent);color:var(--accent-ink)}
 .tag.away{background:var(--soft);color:var(--warn)}
+.wkend{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;margin-bottom:12px;font-size:14px}
+.wkend.away{border-color:var(--sun);background:var(--sun-soft)}
 .who-btn{align-self:flex-start;font-size:13px;padding:4px 8px;color:var(--muted)}
 table.abs th{background:transparent;font-size:13px;text-transform:none;letter-spacing:0;color:var(--ink);position:static}
 table.abs td,table.abs th{border-bottom:1px solid var(--line);padding:8px 10px}
@@ -777,7 +779,7 @@ const ADDONS = [
 ];
 
 /* ============ Réglages ============ */
-const DEF = { store2: "Carrefour Market Beauzelle", where: {}, snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: true, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
+const DEF = { albi: true, albiFrom: 20770, store2: "Carrefour Market Beauzelle", where: {}, snack: false, maxWeek: 20, maxWeekend: 30, longOk: false, fT: 1.5, fA: 1, weight: 75, kcal: 2800, sport: [0, 1, 3, 5], choco: false, leftovers: true, twoShops: true, shop1: 5, shop2: 2, meatAt: "boucher", fishAt: "poissonnier", store: "Fresh Beauzelle", exclude: [], seed: 1 };
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 let S = Object.assign({}, DEF, load("tds:settings", {}));
@@ -785,9 +787,23 @@ let SWAPS = load("tds:swaps", {});
 /* Absences : qui mange à la maison, par jour et par repas. Par défaut : petit-déj et midi pour toi, dîner pour vous deux */
 let AB = load("tds:abs", {});
 const DEFAULT_PRES = { b: { me: true, anna: false }, l: { me: true, anna: false }, d: { me: true, anna: true } };
-function presence(dn, slot) { const o = AB[dn + "|" + slot]; return o ? { me: !!o.me, anna: !!o.anna } : DEFAULT_PRES[slot]; }
-const isDefaultPres = (dn, slot) => !AB[dn + "|" + slot];
+/* Week-ends à Albi : vous partez tous les deux le vendredi (dîner) et rentrez le dimanche soir.
+   Un week-end précis peut être forcé « on reste » ou « on part » (clé <samedi>|wk). */
+function weekendAway(satDn) { const o = AB[satDn + "|wk"]; if (o) return o.mode === "away"; return !!S.albi && satDn - 1 >= (S.albiFrom || 0); }
+function weekendPres(dn, slot) {
+  const wd = wdOf(dn), sat = wd === 4 ? dn + 1 : wd === 5 ? dn : wd === 6 ? dn - 1 : null;
+  if (sat == null || !weekendAway(sat)) return null;
+  const away = { me: false, anna: false };
+  if (wd === 4) return slot === "d" ? away : null;
+  if (wd === 5) return away;
+  return slot === "d" ? { me: true, anna: true } : away;
+}
+function basePres(dn, slot) { return weekendPres(dn, slot) || DEFAULT_PRES[slot]; }
+function presence(dn, slot) { const o = AB[dn + "|" + slot]; return o ? { me: !!o.me, anna: !!o.anna } : basePres(dn, slot); }
+const samePres = (a, b) => a.me === b.me && a.anna === b.anna;
+const isDefaultPres = (dn, slot) => samePres(presence(dn, slot), DEFAULT_PRES[slot]);
 const hasAbs = dn => ["b", "l", "d"].some(s => !isDefaultPres(dn, s));
+const isReturn = dn => wdOf(dn) === 6 && weekendAway(dn - 1) && !AB[dn + "|d"];
 /* Repas pris à l'extérieur : estimation pour ta journée (kcal, protéines) */
 const OUTSIDE = { b: [450, 15], l: [850, 40], d: [850, 40] };
 
@@ -827,6 +843,13 @@ let CACHE = null;
 function resetCache() { CACHE = { days: [], plan: {}, last: {}, pan: {}, waste: [], redW: 0 }; }
 function fruitsFor(dn) { const l = FRUITS[monthOf(dn)].filter(k => !S.exclude.includes(k)); return l.length ? l : ["pomme"]; }
 function shopDays() { return S.twoShops && S.shop2 !== S.shop1 ? [S.shop1, S.shop2] : [S.shop1]; }
+/* Jour de courses réel : un samedi à Albi, la grande course passe au lundi suivant (après le travail) */
+function isShopDay(dn) {
+  const wd = wdOf(dn), sd = shopDays();
+  if (wd === 5 && sd.includes(5) && weekendAway(dn)) return false;
+  if (wd === 0 && sd.includes(5) && !sd.includes(0) && weekendAway(dn - 2)) return true;
+  return sd.includes(wd);
+}
 
 /* Garde-manger : lots { q, exp (dernier jour où c'est bon), fz (congelé) } */
 function avail(k, d) { let s = 0; for (const l of CACHE.pan[k] || []) if (l.exp >= d) s += l.q; return s; }
@@ -889,7 +912,10 @@ function weekPlan(w) {
   const pool = ["vo", "vo", "rg", "le", weighted(rng, { le: 3, oe: 3, vo: 1, rg: 1 })];
   for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
   [0, 1, 2, 3, 4, 5, 6].filter(i => cats[i] == null).forEach((i, k) => cats[i] = pool[k]);
-  return { cats, fresh: [s1, (s1 + 1) % 7, s2, (s2 + 1) % 7] };
+  const start = EPOCH + 7 * w, fresh = [s1, (s1 + 1) % 7, s2, (s2 + 1) % 7];
+  if (weekendAway(start + 5) && s1 === 5) { const t = cats[3]; cats[3] = cats[5]; cats[5] = t; } // poisson du samedi → jeudi
+  if (weekendAway(start - 2)) fresh.push(0, 1); // grande course le lundi
+  return { cats, fresh };
 }
 function swapOf(dn, slot) { const id = SWAPS[dn + "|" + slot]; return id && RBYID[id] ? RBYID[id] : null; }
 const protTarget = () => Math.round(S.weight * 1.8);
@@ -899,7 +925,7 @@ function simDay(d) {
   const plan = CACHE.plan[w] || (CACHE.plan[w] = weekPlan(w));
   if (wd === 0) CACHE.redW = 0;
   const rng = mulberry(d * 7919 + S.seed * 104729 + 17);
-  const day = { dn: d, wd, sport: S.sport.includes(wd), shop: shopDays().includes(wd), buy: [], used: [], notes: [], addons: [], th: [] };
+  const day = { dn: d, wd, sport: S.sport.includes(wd), shop: isShopDay(d), buy: [], used: [], notes: [], addons: [], th: [] };
   const eat = (r, f, slot) => r && r.ings.forEach(([k, q]) => take(k, need(k, q * f), d, slot, day));
   const mine = (r, f) => r && r.ings.forEach(([k, q]) => day.th.push([k, q * f]));
   const one = () => 1, mineF = () => S.fT;
@@ -947,7 +973,9 @@ function simDay(d) {
     let r = swapOf(d, "d");
     if (!r) {
       const cat = plan.cats[wd];
-      r = pick("d", cat, d, rng, srvD, dB);
+      r = isReturn(d)
+        ? pick("d", null, d, rng, srvD, x => (x.cat === "le" || x.cat === "oe" ? 30 : -200) + (x.b ? 15 : -300) + (x.m > 35 ? -40 : 0) + (x.ings.some(([k]) => ING[k].r === "bo" || ING[k].r === "po") ? -300 : 0))
+        : pick("d", cat, d, rng, srvD, dB);
       if (r && cat === "rg" && pdn.me && CACHE.redW + redGrams(r) * S.fT * (leftT(r) && wd < 6 ? 2 : 1) > 500) r = pick("d", "vo", d, rng, srvD, dB);
       if (!r) r = pick("d", null, d, rng, srvD, dB);
     }
@@ -970,11 +998,14 @@ function simDay(d) {
     const [k, p] = nut(), kd = S.kcal - k, pd = protTarget() - p;
     const ok = a => !day.addons.includes(a) && (!a.w || (a.w === "d" ? pdn.me && day.d : pl.me && day.l)) && !a.ing.some(([x]) => S.exclude.includes(x)) && (a.stock || []).every(x => avail(x, d) >= a.ing.find(i => i[0] === x)[1]);
     let c = ADDONS.filter(ok);
+    if (kd < 150 && !(pd > 15)) break; // on ne dépasse pas l'objectif calorique pour quelques grammes de protéines
     if (pd > 8 && c.some(a => a.p)) c = c.filter(a => a.p);
     else if (!(kd > 150)) break;
     if (!c.length) break;
     const st = c.filter(a => a.stock);
     const a = st.length ? st[d % st.length] : c[(d + n) % c.length];
+    const [ak] = a.ing.reduce((t, [x, q]) => { const [u, v] = ingNutr(x, q); return [t[0] + u, t[1] + v]; }, [0, 0]);
+    if (k + ak > S.kcal + 350) break;
     day.addons.push(a);
     a.ing.forEach(([x, q]) => { take(x, need(x, q), d, "a", day); day.th.push([x, q]); });
   }
@@ -1024,9 +1055,9 @@ function weekStats(days) {
 /* ============ Courses ============ */
 function courseFor(dn) {
   const sd = shopDays();
-  let a = dn; while (!sd.includes(wdOf(a))) a--;
-  let b = a + 1; while (!sd.includes(wdOf(b))) b++;
-  let x = a - 1; while (!sd.includes(wdOf(x))) x--;
+  let a = dn; while (!isShopDay(a)) a--;
+  let b = a + 1; while (!isShopDay(b)) b++;
+  let x = a - 1; while (!isShopDay(x)) x--;
   return { dn: a, from: a, to: b - 1, next: b, prev: x };
 }
 const SLOT = { b: "matin", l: "midi", fl: "dessert du midi", c: "goûter", d: "soir", f: "dessert du soir", a: "complément" };
@@ -1046,16 +1077,24 @@ function storeOf(i) {
 function keepDays(k) { const i = ING[k]; if (i.r === "po" || HACHE.includes(k)) return 1; if (["poulet_filet", "poulet_cuisse", "dinde", "canard"].includes(k)) return 2; return 3; }
 /* Ce qu'il faut acheter : uniquement ce qui manque au frigo ou au placard, en paquets entiers */
 function shopList(from, to, buyDn, cut) {
-  ensure(to);
+  ensure(to + 1);
   const items = {};
-  for (let dn = Math.max(from, EPOCH); dn <= to; dn++) {
+  // le petit-déj d'un jour de courses se prépare avant d'y aller : il s'achète à la course précédente
+  // (sauf la boulangerie, où l'on passe le matin même)
+  const sd = shopDays();
+  // samedi : on fait les courses après le petit-déj ; lundi après Albi : après le travail (petit-déj et midi achetés avant)
+  const lateShop = dn => wdOf(dn) === 0 && isShopDay(dn) && !shopDays().includes(0);
+  const morning = (k, slot, dn) => lateShop(dn) ? ["b", "l", "fl"].includes(slot) : slot === "b" && ING[k].r !== "pa";
+  const inList = (dn, k, slot) => dn === to + 1 ? isShopDay(dn) && morning(k, slot, dn) : !(dn === from && isShopDay(from) && morning(k, slot, dn));
+  for (let dn = Math.max(from, EPOCH); dn <= to + 1; dn++) {
     CACHE.days[dn - EPOCH].buy.forEach(b => {
+      if (!inList(dn, b.k, b.slot)) return;
       const it = items[b.k] || (items[b.k] = { k: b.k, n: 0, q: 0, uses: [] });
       if (b.n) it.n += b.n; else it.q += b.q;
     });
   }
   // tous les repas de la période qui utilisent ce que tu achètes (pas seulement le premier)
-  for (let dn = Math.max(from, EPOCH); dn <= to; dn++) CACHE.days[dn - EPOCH].used.forEach(u => { const it = items[u.k]; if (it && !it.uses.some(x => x.dn === dn && x.slot === u.slot)) it.uses.push({ dn, slot: u.slot }); });
+  for (let dn = Math.max(from, EPOCH); dn <= to + 1; dn++) CACHE.days[dn - EPOCH].used.forEach(u => { const it = items[u.k]; if (it && inList(dn, u.k, u.slot) && !it.uses.some(x => x.dn === dn && x.slot === u.slot)) it.uses.push({ dn, slot: u.slot }); });
   let out = Object.values(items);
   // course en cours : on ne garde que ce qui sert aux repas encore à venir
   if (cut) out = out.filter(it => {
@@ -1197,8 +1236,7 @@ function saveAbs(dn, untilDn) {
       const me = f.querySelector(`[data-abs="${slot}-me"]`), an = f.querySelector(`[data-abs="${slot}-anna"]`);
       if (!me && !an) return;
       const p = { me: me ? me.checked : DEFAULT_PRES[slot].me, anna: an ? an.checked : DEFAULT_PRES[slot].anna };
-      const def = DEFAULT_PRES[slot];
-      if (p.me === def.me && p.anna === def.anna) delete AB[x + "|" + slot]; else AB[x + "|" + slot] = p;
+      if (samePres(p, basePres(x, slot))) delete AB[x + "|" + slot]; else AB[x + "|" + slot] = p;
     });
   }
   save("tds:abs", AB); resetCache(); pushPlan(); closeModal(); render(); toast("Enregistré : repas et courses mis à jour");
@@ -1227,6 +1265,7 @@ function vWeek() {
   return `${hero}
   <div class="row between weeknav"><h2>${title}</h2>
     <div class="row"><button class="btn" data-act="wk" data-v="-7" aria-label="Semaine précédente">←</button><button class="btn" data-act="wk" data-v="0">Cette semaine</button><button class="btn" data-act="wk" data-v="7" aria-label="Semaine suivante">→</button></div></div>
+  ${(() => { const sat = st.wk + 5, away = weekendAway(sat); return `<div class="wkend${away ? " away" : ""}"><span>Week-end du ${fmtDate(sat, { noDay: true, noMonth: true })}-${fmtDate(sat + 1, { noDay: true })} : <b>${away ? "à Albi" : "à Toulouse"}</b>${away ? " · grande course le lundi, dîner simple dimanche soir" : ""}</span><button class="btn" data-act="wktoggle" data-dn="${sat}">${away ? "On reste à Toulouse" : "On part à Albi"}</button></div>`; })()}
   <div class="stats">${stats}</div>
   <div class="days">${days.map(dayCard).join("")}</div>
   <div class="legend">${["pg", "pm", "vo", "rg", "le", "oe", "b"].concat(S.snack ? ["c"] : []).map(c => `<span><span class="dot c-${c}"></span>${CAT[c]}</span>`).join("")}</div>
@@ -1431,7 +1470,7 @@ function vCourses() {
     <div class="row between"><div class="eyebrow">${S.twoShops ? "Deux courses par semaine : " + shopNames : "Une course par semaine : le " + JOURS[S.shop1]}</div>${syncBadge()}</div>
     <div class="row between"><h2>Courses du ${fmtDate(c.dn)}</h2>
       <div class="row"><button class="btn" data-act="course" data-v="${c.prev}" aria-label="Course précédente">←</button><button class="btn" data-act="course" data-v="${TODAY}">Prochaine</button><button class="btn" data-act="course" data-v="${c.next}" aria-label="Course suivante">→</button></div></div>
-    <p class="muted" style="margin:0">Pour les repas du ${fmtDate(c.from, { short: true })} au ${fmtDate(c.to, { short: true })}. La liste ne contient que ce qui manque : les paquets déjà ouverts au frigo ou au placard sont utilisés d'abord.</p>
+    <p class="muted" style="margin:0">Pour les repas du ${fmtDate(c.from, { short: true })} midi au ${fmtDate(c.to, { short: true })}${resolve(c.next).b && resolve(c.next).b.ings.some(([k]) => ING[k].r !== "pa") ? `, plus le petit-déj du ${fmtDate(c.next, { short: true })} matin` : ""}. La liste ne contient que ce qui manque : les paquets déjà ouverts au frigo ou au placard sont utilisés d'abord.</p>
     ${cutNote}
     <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${got}" aria-label="Articles pris"><span style="width:${pct}%"></span></div>
     <div class="small num"><b>${got} / ${total}</b> articles pris${got === total && total ? " : tout est dans le caddie" : ""}</div>
@@ -1551,7 +1590,7 @@ function vGuide() {
 
   <section class="card"><h2>Les matins de sport et la chocolatine</h2><ul>
     <li>Une chocolatine, c'est environ 260 kcal de farine blanche, de beurre et de sucre, pour 5 g de protéines. De l'énergie rapide, peu de quoi réparer le muscle.</li>
-    <li>On la garde le samedi, chez un artisan pur beurre, avec un yaourt grec et un fruit. Option désactivable dans Réglages.</li>
+    <li>Tu l'as retirée : le samedi, c'est un petit-déj sport comme les autres jours. Si un jour tu en veux une, elle se réactive dans Réglages.</li>
     <li>Les autres jours de sport : porridge, œufs, overnight oats ou pancakes, entre 20 et 35 g de protéines.</li>
     <li>Si tu t'entraînes tôt et que manger avant te gêne : une banane avant la séance, le petit-déj complet après, dans les 2 heures.</li></ul></section>
 
@@ -1665,6 +1704,7 @@ function vSettings() {
     <div class="field" style="margin-top:10px"><label class="pill${S.choco ? " on" : ""}"><input type="checkbox" data-set="choco"${S.choco ? " checked" : ""}>Garder la chocolatine du samedi</label></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.leftovers ? " on" : ""}"><input type="checkbox" data-set="leftovers"${S.leftovers ? " checked" : ""}>Restes du dîner pour mon midi (lun., mar., jeu., ven.)</label></div>
     <div class="field" style="margin-top:10px"><label class="pill${S.snack ? " on" : ""}"><input type="checkbox" data-set="snack"${S.snack ? " checked" : ""}>Prendre un goûter à 16 h</label><span class="help">Sans goûter, les compléments de prise de masse vont au midi et au soir.</span></div>
+    <div class="field" style="margin-top:10px"><label class="pill${S.albi ? " on" : ""}"><input type="checkbox" data-set="albi"${S.albi ? " checked" : ""}>Week-ends à Albi par défaut</label><span class="help">Départ le vendredi, retour le dimanche soir, tous les deux. Pas de repas ni de courses pendant ce temps, la grande course passe au lundi, et un dîner simple est prévu au retour. Chaque week-end se change dans la semaine.</span></div>
    </section>
    <section class="card"><h2>Courses</h2>
     <div class="field"><label for="s-store">Ton magasin principal</label><input type="text" id="s-store" data-set="store" value="${esc(S.store)}"></div>
@@ -1711,11 +1751,16 @@ document.addEventListener("click", e => {
   if (a === "close") { if (e.target === t || t.tagName === "BUTTON") closeModal(); return; }
   if (a === "open") return openRecipe(t.dataset.id, t.dataset.dn, t.dataset.slot);
   if (a === "abs") return openAbs(+t.dataset.dn);
+  if (a === "wktoggle") {
+    const sat = +t.dataset.dn, away = weekendAway(sat), dflt = !!S.albi && sat - 1 >= (S.albiFrom || 0);
+    if (!away === dflt) delete AB[sat + "|wk"]; else AB[sat + "|wk"] = { mode: away ? "stay" : "away" };
+    save("tds:abs", AB); resetCache(); pushPlan(); render(); toast(away ? "Week-end à Toulouse : repas et courses ajoutés" : "Week-end à Albi : repas et courses retirés"); return;
+  }
   if (a === "where") { const w = Object.assign({}, S.where || {}); if (v) w[t.dataset.k] = v; else delete w[t.dataset.k]; S.where = w; saveSettings(); render(); toast(v ? "Déplacé vers " + (S.store2 || "l'autre magasin") : "Remis à " + S.store); return; }
   if (a === "whereReset") { S.where = {}; saveSettings(); render(); return; }
   if (a === "absall") {
     const f = $("#absForm");
-    f.querySelectorAll("[data-abs]").forEach(cb => { const [slot, w] = cb.dataset.abs.split("-"); cb.checked = v === "reset" ? DEFAULT_PRES[slot][w] : v === w ? false : cb.checked; cb.closest(".pill").classList.toggle("on", cb.checked); });
+    f.querySelectorAll("[data-abs]").forEach(cb => { const [slot, w] = cb.dataset.abs.split("-"); cb.checked = v === "reset" ? basePres(+f.dataset.dn, slot)[w] : v === w ? false : cb.checked; cb.closest(".pill").classList.toggle("on", cb.checked); });
     return;
   }
   if (a === "wk") { st.wk = v === "0" ? mondayOf(TODAY) : Math.max(EPOCH, st.wk + +v); return render(); }
@@ -1746,7 +1791,7 @@ document.addEventListener("change", e => {
   if (t.dataset.act === "ym") { const [y, m] = t.value.split("-").map(Number); st.ym = [y, m]; return render(); }
   const k = t.dataset.set; if (!k) return;
   if (k === "sport" || k === "exclude") { const v = k === "sport" ? +t.value : t.value; const arr = new Set(S[k]); t.checked ? arr.add(v) : arr.delete(v); S[k] = [...arr].sort(); }
-  else if (["choco", "leftovers", "twoShops", "longOk", "snack"].includes(k)) S[k] = t.checked;
+  else if (["choco", "leftovers", "twoShops", "longOk", "snack", "albi"].includes(k)) S[k] = t.checked;
   else if (["shop1", "shop2", "maxWeek", "maxWeekend"].includes(k)) S[k] = +t.value;
   else if (["weight", "kcal", "fT", "fA"].includes(k)) { const n = parseFloat(t.value); if (!isFinite(n)) return; S[k] = n; }
   else S[k] = t.value;
